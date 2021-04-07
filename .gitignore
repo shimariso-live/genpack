@@ -1,0 +1,8 @@
+.vscode
+__pycache__
+genpack
+work
+*.zip
+*.squashfs
+*.o
+*.a
