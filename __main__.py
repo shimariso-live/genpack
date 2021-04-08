@@ -84,8 +84,8 @@ def sync_files(srcdir, dstdir):
     return newest_file
 
 def put_resource_file(gentoo_dir, module, filename, dst_filename=None):
-    with open(os.path.join(gentoo_dir, filename), "wb") as f:
-        f.write(importlib.resources.read_binary(module, dst_filename if dst_filename is not None else filename))
+    with open(os.path.join(gentoo_dir, dst_filename if dst_filename is not None else filename), "wb") as f:
+        f.write(importlib.resources.read_binary(module, filename))
 
 def load_json_file(path):
     if not os.path.isfile(path): return None
@@ -112,6 +112,7 @@ def main(base, workdir, arch, sync, bash, artifact, outfile, profile=None):
 
     gentoo_dir = os.path.join(arch_workdir, "profiles", profile, "root")
     repos_dir = os.path.join(gentoo_dir, "var/db/repos/gentoo")
+    usr_local_dir = os.path.join(gentoo_dir, "usr/local")
 
     if not os.path.isfile(stage3_tarball) or os.path.getsize(stage3_tarball) != get_content_length(stage3_tarball_url):
         subprocess.check_call(["wget", "-O", stage3_tarball, stage3_tarball_url])
@@ -133,7 +134,7 @@ def main(base, workdir, arch, sync, bash, artifact, outfile, profile=None):
         subprocess.check_call(sudo(["tar", "xpf", portage_tarball, "--strip-components=1", "-C", repos_dir]))
         kernel_config_dir = os.path.join(gentoo_dir, "etc/kernels")
         subprocess.check_call(sudo(["mkdir", "-p", kernel_config_dir]))
-        subprocess.check_call(sudo(["chmod", "-R", "o+rw", os.path.join(gentoo_dir, "etc/portage"), os.path.join(gentoo_dir, "usr/src"), os.path.join(gentoo_dir, "var/db/repos"), kernel_config_dir]))
+        subprocess.check_call(sudo(["chmod", "-R", "o+rw", os.path.join(gentoo_dir, "etc/portage"), os.path.join(gentoo_dir, "usr/src"), os.path.join(gentoo_dir, "var/db/repos"), kernel_config_dir, usr_local_dir]))
         with open(os.path.join(gentoo_dir, "etc/portage/make.conf"), "a") as f:
             f.write('FEATURES="-sandbox -usersandbox -network-sandbox"\n')
         with open(stage3_done_file, "w") as f:
@@ -142,6 +143,8 @@ def main(base, workdir, arch, sync, bash, artifact, outfile, profile=None):
     newest_file = link_files(os.path.join(".", "profiles", profile), gentoo_dir)
     put_resource_file(gentoo_dir, initlib, "initlib.cpp")
     put_resource_file(gentoo_dir, initlib, "initlib.h")
+    put_resource_file(gentoo_dir, util, "build-kernel.py", "usr/local/sbin/build-kernel")
+    os.chmod(os.path.join(usr_local_dir, "sbin/build-kernel"), 0o755)
     put_resource_file(gentoo_dir, util, "install-system-image")
     put_resource_file(gentoo_dir, util, "expand-rw-layer")
 
@@ -159,8 +162,8 @@ def main(base, workdir, arch, sync, bash, artifact, outfile, profile=None):
     portage_time = os.stat(os.path.join(repos_dir, "metadata/timestamp")).st_mtime
     newest_file = max(newest_file, portage_time)
 
-    if (not done_file_time or newest_file > done_file_time or sync):
-        lower_exec(gentoo_dir, cache_dir, ["emerge", "-uDN", "-bk", "--binpkg-respect-use=y", "system", "gentoolkit", "strace","repoman", "iniparser","vim"])
+    if (not done_file_time or newest_file > done_file_time or sync or artifact == "none"):
+        lower_exec(gentoo_dir, cache_dir, ["emerge", "-uDN", "-bk", "--binpkg-respect-use=y", "system", "nano", "gentoolkit", "strace","repoman", "vim"])
         if os.path.isfile(os.path.join(gentoo_dir, "build.sh")):
             lower_exec(gentoo_dir, cache_dir, ["/build.sh"])
         lower_exec(gentoo_dir, cache_dir, ["sh", "-c", "emerge -bk --binpkg-respect-use=y @preserved-rebuild && emerge --depclean && eselect python update && eselect python cleanup && etc-update --automode -5 && eclean-dist -d && eclean-pkg -d"])
