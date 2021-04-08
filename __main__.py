@@ -68,7 +68,8 @@ def link_files(srcdir, dstdir):
         dst = os.path.join(dstdir, f)
         if not os.path.isfile(dst) or os.stat(src).st_mtime > os.stat(dst).st_mtime:
             os.makedirs(os.path.dirname(dst), exist_ok=True)
-            os.link(os.path.join(srcdir, f), os.path.join(dstdir, f))
+            if os.path.isfile(dst): os.unlink(dst)
+            os.link(src, dst)
     
     return newest_file
 
@@ -337,7 +338,7 @@ def copy(gentoo_dir, upper_dir, files):
             target = link[1:] if link[0] == '/' else os.path.join(os.path.dirname(f_wo_leading_slash), link)
             rsync.stdin.write(encode_utf8(target + '\n'))
     rsync.stdin.close()
-    rsync.wait()
+    if rsync.wait() != 0: raise BaseException("rsync returned error code.")
 
 def copyup_gcc_libs(gentoo_dir, upper_dir):
     subprocess.check_call(sudo(["systemd-nspawn", "-q", "-D", gentoo_dir, "--overlay=+/:%s:/" % os.path.abspath(upper_dir), "sh", "-c", "touch -h `gcc --print-file-name=`/*.so.* && ldconfig" ]))
