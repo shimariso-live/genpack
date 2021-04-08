@@ -176,7 +176,7 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     elif artifact == "bash": return lower_exec(gentoo_dir, cache_dir, ["bash"])
     #else
 
-    artifact_pkgs = ["util-linux","timezone-data","bash","nano","openssh", "sed", "gawk", "wget", "rsync", "coreutils", "procps", "net-tools", 
+    artifact_pkgs = ["util-linux","timezone-data","bash","nano","openssh", "sed", "gawk", "wget", "curl", "rsync", "coreutils", "procps", "net-tools", 
         "iproute2", "iputils", "dbus", "python"]
     if build_json and "packages" in build_json:
         if not isinstance(build_json["packages"], list): raise Exception("packages must be list")
