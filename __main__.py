@@ -9,6 +9,7 @@ import urllib.request
 import initlib,util
 
 BASE_URL="http://ftp.iij.ad.jp/pub/linux/gentoo/"
+CONTAINER_NAME="genpack-%d" % os.getpid()
 
 def decode_utf8(bin):
     return bin.decode("utf-8")
@@ -47,7 +48,7 @@ def sudo(cmdline):
     return ["sudo"] + cmdline
 
 def lower_exec(lower_dir, cache_dir, cmdline, nspawn_opts=[]):
-    subprocess.check_call(sudo(["systemd-nspawn", "-q", "-D", lower_dir, "--bind=%s:/var/cache" % os.path.abspath(cache_dir)] + nspawn_opts + cmdline))
+    subprocess.check_call(sudo(["systemd-nspawn", "-q", "-M", CONTAINER_NAME, "-D", lower_dir, "--bind=%s:/var/cache" % os.path.abspath(cache_dir)] + nspawn_opts + cmdline))
 
 def scan_files(dir):
     files_found = []
@@ -94,7 +95,7 @@ def load_json_file(path):
     with open(path) as f:
         return json.load(f)
 
-def main(base, workdir, arch, sync, bash, artifact, outfile, profile=None):
+def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     artifact_dir = os.path.join(".", "artifacts", artifact)
     build_json = load_json_file(os.path.join(artifact_dir, "build.json"))
 
@@ -175,7 +176,8 @@ def main(base, workdir, arch, sync, bash, artifact, outfile, profile=None):
     elif artifact == "bash": return lower_exec(gentoo_dir, cache_dir, ["bash"])
     #else
 
-    artifact_pkgs = ["util-linux","timezone-data","bash","nano","openssh", "sed", "gawk", "wget", "rsync", "coreutils", "procps", "net-tools", "iproute2", "iputils", "dbus", "python"]
+    artifact_pkgs = ["util-linux","timezone-data","bash","nano","openssh", "sed", "gawk", "wget", "rsync", "coreutils", "procps", "net-tools", 
+        "iproute2", "iputils", "dbus", "python"]
     if build_json and "packages" in build_json:
         if not isinstance(build_json["packages"], list): raise Exception("packages must be list")
         #else
@@ -184,12 +186,9 @@ def main(base, workdir, arch, sync, bash, artifact, outfile, profile=None):
     pkg_map = collect_packages(gentoo_dir)
     pkgs = scan_pkg_dep(gentoo_dir, pkg_map, artifact_pkgs)
     files = process_pkgs(gentoo_dir, pkgs)
-    if os.path.isfile(os.path.join(gentoo_dir, "boot/kernel")):
-        files.append("/boot/kernel")
-    if os.path.isfile(os.path.join(gentoo_dir, "boot/initramfs")):
-        files.append("/boot/initramfs")
-    if os.path.isdir(os.path.join(gentoo_dir, "lib/modules")):
-        files.append("/lib/modules/.")
+    if os.path.isfile(os.path.join(gentoo_dir, "boot/kernel")): files.append("/boot/kernel")
+    if os.path.isfile(os.path.join(gentoo_dir, "boot/initramfs")): files.append("/boot/initramfs")
+    if os.path.isdir(os.path.join(gentoo_dir, "lib/modules")): files.append("/lib/modules/.")
     files += ["/dev/.", "/proc", "/sys", "/root", "/home", "/tmp", "/var/tmp", "/var/run", "/run", "/mnt"]
     files += ["/etc/passwd", "/etc/group", "/etc/shadow", "/etc/profile.env"]
     files += ["/etc/ld.so.conf", "/etc/ld.so.conf.d/."]
@@ -222,7 +221,7 @@ def main(base, workdir, arch, sync, bash, artifact, outfile, profile=None):
         print("Processing package %s..." % pkg_wo_ver)
         newest_pkg_file = max(newest_pkg_file, sync_files(package_dir, upper_dir))
         if os.path.isfile(os.path.join(upper_dir, "pkgbuild")):
-            subprocess.check_call(sudo(["systemd-nspawn", "-q", "-D", gentoo_dir, "--overlay=+/:%s:/" % os.path.abspath(upper_dir), "-E", "PROFILE=%s" % profile, "-E", "ARTIFACT=%s" % artifact, "sh", "-c", "/pkgbuild && rm /pkgbuild" ]))
+            subprocess.check_call(sudo(["systemd-nspawn", "-q", "-M", CONTAINER_NAME, "-D", gentoo_dir, "--overlay=+/:%s:/" % os.path.abspath(upper_dir), "-E", "PROFILE=%s" % profile, "-E", "ARTIFACT=%s" % artifact, "sh", "-c", "/pkgbuild && rm /pkgbuild" ]))
 
     # enable services
     services = ["sshd","systemd-networkd", "systemd-resolved"]
@@ -235,13 +234,18 @@ def main(base, workdir, arch, sync, bash, artifact, outfile, profile=None):
     newest_artifact_file = max(newest_pkg_file, sync_files(artifact_dir, upper_dir))
     if os.path.isfile(os.path.join(upper_dir, "build")):
         print("Building artifact...")
-        subprocess.check_call(sudo(["systemd-nspawn", "-q", "-D", gentoo_dir, "--overlay=+/:%s:/" % os.path.abspath(upper_dir), "/build" ]))
+        subprocess.check_call(sudo(["systemd-nspawn", "-q", "-M", CONTAINER_NAME, "-D", gentoo_dir, "--overlay=+/:%s:/" % os.path.abspath(upper_dir), "/build" ]))
     else:
         print("Artifact build script not found.")
     subprocess.check_call(sudo(["rm", "-rf", os.path.join(upper_dir, "build"), os.path.join(upper_dir,"build.json"), os.path.join(upper_dir,"usr/src")]))
 
+    # final output
+    if outfile is None:
+        if build_json and "outfile" in build_json: outfile = build_json["outfile"]
+        else: outfile = "%s-%s.squashfs" % (artifact, arch)
+
     if outfile == "-":
-        subprocess.check_call(sudo(["systemd-nspawn", "-q", "-D", upper_dir, "--network-veth", "-b"]))
+        subprocess.check_call(sudo(["systemd-nspawn", "-M", CONTAINER_NAME, "-q", "-D", upper_dir, "--network-veth", "-b"]))
     else:
         pack(upper_dir, outfile)
 
@@ -341,7 +345,7 @@ def copy(gentoo_dir, upper_dir, files):
     if rsync.wait() != 0: raise BaseException("rsync returned error code.")
 
 def copyup_gcc_libs(gentoo_dir, upper_dir):
-    subprocess.check_call(sudo(["systemd-nspawn", "-q", "-D", gentoo_dir, "--overlay=+/:%s:/" % os.path.abspath(upper_dir), "sh", "-c", "touch -h `gcc --print-file-name=`/*.so.* && ldconfig" ]))
+    subprocess.check_call(sudo(["systemd-nspawn", "-q", "-M", CONTAINER_NAME, "-D", gentoo_dir, "--overlay=+/:%s:/" % os.path.abspath(upper_dir), "sh", "-c", "touch -h `gcc --print-file-name=`/*.so.* && ldconfig" ]))
 
 def remove_root_password(root_dir):
     subprocess.check_call(sudo(["sed", "-i", r"s/^root:\*:/root::/", os.path.join(root_dir, "etc/shadow") ]))
@@ -351,7 +355,7 @@ def create_default_iptables_rules(root_dir):
 
 def enable_services(root_dir, services):
     if not isinstance(services, list): services = [services]
-    subprocess.check_call(sudo(["systemd-nspawn", "-q", "-D", root_dir, "systemctl", "enable"] + services))
+    subprocess.check_call(sudo(["systemd-nspawn", "-q", "-M", CONTAINER_NAME, "-D", root_dir, "systemctl", "enable"] + services))
 
 def pack(upper_dir, outfile):
     subprocess.check_call(sudo(["mksquashfs", upper_dir, outfile, "-noappend", "-comp", "xz", "-no-exports", "-b", "1M", "-Xbcj", "x86"]))
@@ -379,6 +383,6 @@ if __name__ == "__main__":
     if args.artifact == "clean":
         clean(args.workdir, arch, args.profile)
     else:
-        main(args.base, args.workdir, arch, args.sync, args.bash, args.artifact, args.outfile if args.outfile is not None else "%s-%s.squashfs" % (args.artifact, arch), args.profile)
+        main(args.base, args.workdir, arch, args.sync, args.bash, args.artifact, args.outfile, args.profile)
 
     print("Done.")
