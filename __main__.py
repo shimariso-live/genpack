@@ -93,7 +93,7 @@ def load_json_file(path):
     with open(path) as f:
         return json.load(f)
 
-def main(base, workdir, arch, sync, artifact, outfile, profile=None):
+def main(base, workdir, arch, sync, bash, artifact, outfile, profile=None):
     artifact_dir = os.path.join(".", "artifacts", artifact)
     build_json = load_json_file(os.path.join(artifact_dir, "build.json"))
 
@@ -152,6 +152,12 @@ def main(base, workdir, arch, sync, artifact, outfile, profile=None):
     os.makedirs(cache_dir, exist_ok=True)
 
     if sync: lower_exec(gentoo_dir, cache_dir, ["emerge", "--sync"])
+    if bash: 
+        print("Entering shell... 'exit 1' to abort the process.")
+        lower_exec(gentoo_dir, cache_dir, ["bash"])
+
+    portage_time = os.stat(os.path.join(repos_dir, "metadata/timestamp")).st_mtime
+    newest_file = max(newest_file, portage_time)
 
     if (not done_file_time or newest_file > done_file_time or sync):
         lower_exec(gentoo_dir, cache_dir, ["emerge", "-uDN", "-bk", "--binpkg-respect-use=y", "system", "gentoolkit", "strace","repoman", "iniparser","vim"])
@@ -161,10 +167,11 @@ def main(base, workdir, arch, sync, artifact, outfile, profile=None):
         with open(done_file, "w") as f:
             pass
     
-    if artifact == "bash": return lower_exec(gentoo_dir, cache_dir, ["bash"])
+    if artifact == "none": return # no build artifact
+    elif artifact == "bash": return lower_exec(gentoo_dir, cache_dir, ["bash"])
     #else
 
-    artifact_pkgs = ["util-linux","timezone-data","bash","openssh", "sed", "gawk", "wget", "rsync", "coreutils", "procps", "net-tools", "iproute2", "iputils", "dbus", "python"]
+    artifact_pkgs = ["util-linux","timezone-data","bash","nano","openssh", "sed", "gawk", "wget", "rsync", "coreutils", "procps", "net-tools", "iproute2", "iputils", "dbus", "python"]
     if build_json and "packages" in build_json:
         if not isinstance(build_json["packages"], list): raise Exception("packages must be list")
         #else
@@ -361,12 +368,13 @@ if __name__ == "__main__":
     parser.add_argument("--workdir", default="./work", help="Working directory to use")
     parser.add_argument("-o", "--outfile", default=None, help="Output file")
     parser.add_argument("--sync", action="store_true", default=False, help="Run emerge --sync before build gentoo")
+    parser.add_argument("--bash", action="store_true", default=False, help="Enter bash before anything")
     parser.add_argument("--profile", default=None, help="Override profile")
     parser.add_argument("artifact", default="default", nargs='?', help="Artifact to build")
     args = parser.parse_args()
     if args.artifact == "clean":
         clean(args.workdir, arch, args.profile)
     else:
-        main(args.base, args.workdir, arch, args.sync, args.artifact, args.outfile if args.outfile is not None else "%s-%s.squashfs" % (args.artifact, arch), args.profile)
+        main(args.base, args.workdir, arch, args.sync, args.bash, args.artifact, args.outfile if args.outfile is not None else "%s-%s.squashfs" % (args.artifact, arch), args.profile)
 
     print("Done.")
