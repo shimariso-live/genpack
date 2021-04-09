@@ -14,7 +14,7 @@ def update_kernel_config(config):
 
 def main(kernelpkg,config,nocache=False,menuconfig=False):
     # emerge kernel and requirements
-    subprocess.check_call(["emerge", "-u", "-bk", "--binpkg-respect-use=y", "genkernel", "eclean-kernel", kernelpkg], 
+    subprocess.check_call(["emerge", "-u", "-bk", "--binpkg-respect-use=y", "genkernel", "eclean-kernel", "linux-sources", kernelpkg], 
         env={"PATH":os.environ["PATH"],"USE":"symlink","ACCEPT_LICENSE":"linux-fw-redistributable no-source-code"})
 
     genkernel_cmdline = ["genkernel", "--symlink", "--no-mountboot", "--no-bootloader", "--kernel-config=%s" % config, 
@@ -37,7 +37,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="/kernel-config", help="Specify kernel config file")
     parser.add_argument("--nocache", action="store_true", default=False, help="Invalidate kerncache")
-    parser.add_argument("--menuconfig", action="store_true", default=False, help="Run menuconfig")
+    parser.add_argument("--menuconfig", action="store_true", default=False, help="Run menuconfig(implies --nocache)")
     parser.add_argument("kernelpkg", default="gentoo-sources", nargs='?', help="Kernel package ebuild name")
     args = parser.parse_args()
     main(args.kernelpkg, args.config, args.nocache, args.menuconfig)
