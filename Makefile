@@ -1,6 +1,6 @@
 all: genpack
 
-genpack.zip: __main__.py initlib/__init__.py initlib/initlib.cpp initlib/initlib.h util/__init__.py util/install-system-image util/expand-rw-layer util/build-kernel.py
+genpack.zip: __main__.py qemu.py initlib/__init__.py initlib/initlib.cpp initlib/initlib.h util/__init__.py util/install-system-image util/expand-rw-layer util/build-kernel.py
 	python -m py_compile __main__.py
 	rm -f $@
 	zip $@ $^

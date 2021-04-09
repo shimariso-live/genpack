@@ -7,6 +7,7 @@ import importlib.resources
 import urllib.request
 
 import initlib,util
+import qemu
 
 BASE_URL="http://ftp.iij.ad.jp/pub/linux/gentoo/"
 CONTAINER_NAME="genpack-%d" % os.getpid()
@@ -84,6 +85,9 @@ def sync_files(srcdir, dstdir):
             subprocess.check_call(sudo(["rsync", "-k", "-R", "--chown=root:root", os.path.join(srcdir, ".", f), dstdir]))
     
     return newest_file
+
+def get_newest_mtime(srcdir):
+    return scan_files(srcdir)[1]
 
 def put_resource_file(gentoo_dir, module, filename, dst_filename=None):
     with open(os.path.join(gentoo_dir, dst_filename if dst_filename is not None else filename), "wb") as f:
@@ -172,10 +176,33 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
         with open(done_file, "w") as f:
             pass
     
-    if artifact == "none": return # no build artifact
-    elif artifact == "bash": return lower_exec(gentoo_dir, cache_dir, ["bash"])
+    if artifact == "none": return None # no build artifact
+    elif artifact == "bash": 
+        lower_exec(gentoo_dir, cache_dir, ["bash"])
+        return None
     #else
 
+    ##### building profile done
+    ##### build artifact if necessary
+    upper_dir = os.path.join(arch_workdir, "artifacts", artifact)
+    genpack_metadata_dir = os.path.join(upper_dir, ".genpack")
+    if not os.path.exists(genpack_metadata_dir) or os.stat(genpack_metadata_dir).st_mtime < max(os.stat(done_file).st_mtime, get_newest_mtime(artifact_dir), get_newest_mtime(os.path.join(".", "packages"))):
+        build_artifact(profile, artifact, gentoo_dir, upper_dir, build_json)
+
+    # final output
+    if outfile is None:
+        if build_json and "outfile" in build_json: outfile = build_json["outfile"]
+        else: outfile = "%s-%s.squashfs" % (artifact, arch)
+
+    if outfile == "-":
+        subprocess.check_call(sudo(["systemd-nspawn", "-M", CONTAINER_NAME, "-q", "-D", upper_dir, "--network-veth", "-b"]))
+        return None
+    #else
+    if not os.path.isfile(outfile) or os.stat(genpack_metadata_dir).st_mtime > os.stat(outfile).st_mtime:
+        pack(upper_dir, outfile)
+    return outfile
+
+def build_artifact(profile, artifact, gentoo_dir, upper_dir, build_json):
     artifact_pkgs = ["util-linux","timezone-data","bash","nano","openssh", "sed", "gawk", "wget", "curl", "rsync", "coreutils", "procps", "net-tools", 
         "iproute2", "iputils", "dbus", "python"]
     if build_json and "packages" in build_json:
@@ -192,7 +219,7 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     files += ["/dev/.", "/proc", "/sys", "/root", "/home", "/tmp", "/var/tmp", "/var/run", "/run", "/mnt"]
     files += ["/etc/passwd", "/etc/group", "/etc/shadow", "/etc/profile.env"]
     files += ["/etc/ld.so.conf", "/etc/ld.so.conf.d/."]
-    files += ["/bin/sh", "/usr/bin/python", "/usr/bin/vi", "/usr/bin/strings", "/usr/bin/strace"]
+    files += ["/bin/sh", "/usr/bin/python", "/usr/bin/vi", "/usr/bin/strings", "/usr/bin/strace", "/usr/bin/make", "/usr/bin/diff"]
     files += ["/sbin/iptables", "/sbin/ip6tables", "/sbin/iptables-restore", "/sbin/ip6tables-restore", "/sbin/iptables-save", "/sbin/ip6tables-save"]
 
     if build_json and "files" in build_json:
@@ -200,11 +227,11 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
         #else
         files += build_json["files"]
 
-    upper_dir = os.path.join(arch_workdir, "artifacts", artifact)
     if os.path.isdir(upper_dir):
         print("Deleting previous artifact dir...")
         subprocess.check_call(sudo(["rm", "-rf", upper_dir]))
-    subprocess.check_call(sudo(["mkdir", "-p", upper_dir]))
+    os.makedirs(os.path.dirname(upper_dir), exist_ok=True)
+    subprocess.check_call(sudo(["mkdir", upper_dir]))
     print("Copying files to artifact dir...")
     copy(gentoo_dir, upper_dir, files)
     copyup_gcc_libs(gentoo_dir, upper_dir)
@@ -231,6 +258,7 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
         services += build_json["services"]
     enable_services(upper_dir, services)
 
+    artifact_dir = os.path.join(".", "artifacts", artifact)
     newest_artifact_file = max(newest_pkg_file, sync_files(artifact_dir, upper_dir))
     if os.path.isfile(os.path.join(upper_dir, "build")):
         print("Building artifact...")
@@ -239,15 +267,20 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
         print("Artifact build script not found.")
     subprocess.check_call(sudo(["rm", "-rf", os.path.join(upper_dir, "build"), os.path.join(upper_dir,"build.json"), os.path.join(upper_dir,"usr/src")]))
 
-    # final output
-    if outfile is None:
-        if build_json and "outfile" in build_json: outfile = build_json["outfile"]
-        else: outfile = "%s-%s.squashfs" % (artifact, arch)
-
-    if outfile == "-":
-        subprocess.check_call(sudo(["systemd-nspawn", "-M", CONTAINER_NAME, "-q", "-D", upper_dir, "--network-veth", "-b"]))
-    else:
-        pack(upper_dir, outfile)
+    # generate metadata
+    # TODO: use tee
+    genpack_metadata_dir = os.path.join(upper_dir, ".genpack")
+    subprocess.check_call(sudo(["mkdir", genpack_metadata_dir]))
+    subprocess.check_call(sudo(["chmod", "o+rwx", genpack_metadata_dir]))
+    with open(os.path.join(genpack_metadata_dir, "profile"), "w") as f:
+        f.write(profile)
+    with open(os.path.join(genpack_metadata_dir, "artifact"), "w") as f:
+        f.write(artifact)
+    with open(os.path.join(genpack_metadata_dir, "packages"), "w") as f:
+        for pkg in pkgs:
+            f.write(pkg + '\n')
+    subprocess.check_call(sudo(["chown", "-R", "root.root", genpack_metadata_dir]))
+    subprocess.check_call(sudo(["chmod", "755", genpack_metadata_dir]))
 
 def strip_ver(pkgname):
     pkgname = re.sub(r'-r[0-9]+?$', "", pkgname) # remove rev part
@@ -276,8 +309,19 @@ def collect_packages(gentoo_dir):
             else: pkg_map[cat_pn_wo_ver] = [cat_pn]
     return pkg_map
 
+def get_package_set(gentoo_dir, set_name):
+    pkgs = []
+    with open(os.path.join(gentoo_dir, "etc/portage/sets", set_name)) as f:
+        for line in f:
+            line = re.sub(r'#.*', "", line).strip()
+            if line != "": pkgs.append(line)
+    return pkgs
+
 def scan_pkg_dep(gentoo_dir, pkg_map, pkgnames, pkgs = set()):
     for pkgname in pkgnames:
+        if pkgname[0] == '@':
+            scan_pkg_dep(gentoo_dir, pkg_map, get_package_set(gentoo_dir, pkgname[1:]), pkgs)
+            continue
         if pkgname not in pkg_map: raise BaseException("Package %s not found" % pkgname)
         if len(pkg_map[pkgname]) > 1: raise BaseException("Package %s is ambigious" % pkgname)
         cat_pn = pkg_map[pkgname][0]
@@ -303,7 +347,8 @@ def scan_pkg_dep(gentoo_dir, pkg_map, pkgnames, pkgs = set()):
 
 def is_path_excluded(path):
     for expr in ["/run/","/var/run/","/usr/share/man/","/usr/share/doc/","/usr/share/gtk-doc/","/usr/share/info/",
-        "/usr/include/","/var/cache/",re.compile(r'^/usr/lib/python[0-9\.]+?/test/'),re.compile(r'\.a$')]:
+        "/usr/include/","/var/cache/",re.compile(r'^/usr/lib/python[0-9\.]+?/test/'),re.compile(r'\.a$'),
+        re.compile(r"\/gschemas.compiled$"), re.compile(r"\/giomodule.cache$")]:
         if isinstance(expr, re.Pattern):
             if re.search(expr, path): return True
         elif isinstance(expr, str):
@@ -377,12 +422,15 @@ if __name__ == "__main__":
     parser.add_argument("-o", "--outfile", default=None, help="Output file")
     parser.add_argument("--sync", action="store_true", default=False, help="Run emerge --sync before build gentoo")
     parser.add_argument("--bash", action="store_true", default=False, help="Enter bash before anything")
+    parser.add_argument("--qemu", action="store_true", default=False, help="Run generated rootfs using qemu")
     parser.add_argument("--profile", default=None, help="Override profile")
     parser.add_argument("artifact", default="default", nargs='?', help="Artifact to build")
     args = parser.parse_args()
     if args.artifact == "clean":
         clean(args.workdir, arch, args.profile)
     else:
-        main(args.base, args.workdir, arch, args.sync, args.bash, args.artifact, args.outfile, args.profile)
+        outfile = main(args.base, args.workdir, arch, args.sync, args.bash, args.artifact, args.outfile, args.profile)
+        if outfile is not None and args.qemu:
+            qemu.run(outfile, os.path.join(args.workdir, "qemu.img"))
 
     print("Done.")
