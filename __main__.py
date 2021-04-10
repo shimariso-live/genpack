@@ -126,7 +126,6 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     if not os.path.isfile(portage_tarball) or os.path.getsize(portage_tarball) != get_content_length(portage_tarball_url):
         subprocess.check_call(["wget", "-O", portage_tarball, portage_tarball_url])
 
-    tarball_time = max(os.stat(stage3_tarball).st_mtime, os.stat(portage_tarball).st_mtime)
     stage3_done_file = os.path.join(gentoo_dir, ".stage3-done")
     stage3_done_file_time = os.stat(stage3_done_file).st_mtime if os.path.isfile(stage3_done_file) else None
     if not stage3_done_file_time or stage3_done_file_time < os.stat(stage3_tarball).st_mtime:
@@ -153,6 +152,8 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     os.chmod(os.path.join(usr_local_dir, "sbin/build-kernel"), 0o755)
     put_resource_file(gentoo_dir, util, "install-system-image")
     put_resource_file(gentoo_dir, util, "expand-rw-layer")
+    put_resource_file(gentoo_dir, util, "do-with-lvm-snapshot")
+    put_resource_file(gentoo_dir, util, "rpmbootstrap.py", "rpmbootstrap")
 
     done_file = os.path.join(gentoo_dir, ".done")
     done_file_time = os.stat(done_file).st_mtime if os.path.isfile(done_file) else None
@@ -219,7 +220,9 @@ def build_artifact(profile, artifact, gentoo_dir, upper_dir, build_json):
     files += ["/dev/.", "/proc", "/sys", "/root", "/home", "/tmp", "/var/tmp", "/var/run", "/run", "/mnt"]
     files += ["/etc/passwd", "/etc/group", "/etc/shadow", "/etc/profile.env"]
     files += ["/etc/ld.so.conf", "/etc/ld.so.conf.d/."]
-    files += ["/bin/sh", "/usr/bin/python", "/usr/bin/vi", "/usr/bin/strings", "/usr/bin/strace", "/usr/bin/make", "/usr/bin/diff"]
+    files += ["/usr/lib/locale/locale-archive"]
+    files += ["/bin/sh", "/usr/bin/python", "/usr/bin/vi", "/usr/bin/strings", "/usr/bin/strace", "/usr/bin/make", 
+        "/usr/bin/diff", "/usr/bin/find", "/usr/bin/xargs", "/usr/bin/less"]
     files += ["/sbin/iptables", "/sbin/ip6tables", "/sbin/iptables-restore", "/sbin/ip6tables-restore", "/sbin/iptables-save", "/sbin/ip6tables-save"]
 
     if build_json and "files" in build_json:
@@ -423,6 +426,7 @@ if __name__ == "__main__":
     parser.add_argument("--sync", action="store_true", default=False, help="Run emerge --sync before build gentoo")
     parser.add_argument("--bash", action="store_true", default=False, help="Enter bash before anything")
     parser.add_argument("--qemu", action="store_true", default=False, help="Run generated rootfs using qemu")
+    parser.add_argument("--drm", action="store_true", default=False, help="Enable DRM(virgl) when running qemu")
     parser.add_argument("--profile", default=None, help="Override profile")
     parser.add_argument("artifact", default="default", nargs='?', help="Artifact to build")
     args = parser.parse_args()
@@ -431,6 +435,6 @@ if __name__ == "__main__":
     else:
         outfile = main(args.base, args.workdir, arch, args.sync, args.bash, args.artifact, args.outfile, args.profile)
         if outfile is not None and args.qemu:
-            qemu.run(outfile, os.path.join(args.workdir, "qemu.img"))
+            qemu.run(outfile, os.path.join(args.workdir, "qemu.img"), args.drm)
 
     print("Done.")
