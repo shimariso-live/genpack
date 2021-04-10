@@ -8,6 +8,7 @@ import urllib.request
 
 import initlib,util
 import qemu
+from sudo import sudo,Tee
 
 BASE_URL="http://ftp.iij.ad.jp/pub/linux/gentoo/"
 CONTAINER_NAME="genpack-%d" % os.getpid()
@@ -43,10 +44,6 @@ def get_content_length(url):
             return int(headers["Content-Length"])
     #else
     return None
-
-def sudo(cmdline):
-    if os.geteuid() == 0: return cmdline
-    return ["sudo"] + cmdline
 
 def lower_exec(lower_dir, cache_dir, cmdline, nspawn_opts=[]):
     subprocess.check_call(sudo(["systemd-nspawn", "-q", "-M", CONTAINER_NAME, "-D", lower_dir, "--bind=%s:/var/cache" % os.path.abspath(cache_dir)] + nspawn_opts + cmdline))
@@ -89,9 +86,11 @@ def sync_files(srcdir, dstdir):
 def get_newest_mtime(srcdir):
     return scan_files(srcdir)[1]
 
-def put_resource_file(gentoo_dir, module, filename, dst_filename=None):
-    with open(os.path.join(gentoo_dir, dst_filename if dst_filename is not None else filename), "wb") as f:
+def put_resource_file(gentoo_dir, module, filename, dst_filename=None, make_executable=False):
+    dst_path = os.path.join(gentoo_dir, dst_filename if dst_filename is not None else filename)
+    with Tee(dst_path) as f:
         f.write(importlib.resources.read_binary(module, filename))
+    if make_executable: subprocess.check_output(sudo(["chmod", "+x", dst_path]))
 
 def load_json_file(path):
     if not os.path.isfile(path): return None
@@ -148,15 +147,11 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     newest_file = link_files(os.path.join(".", "profiles", profile), gentoo_dir)
     put_resource_file(gentoo_dir, initlib, "initlib.cpp")
     put_resource_file(gentoo_dir, initlib, "initlib.h")
-    put_resource_file(gentoo_dir, util, "build-kernel.py", "usr/local/sbin/build-kernel")
-    os.chmod(os.path.join(usr_local_dir, "sbin/build-kernel"), 0o755)
-    put_resource_file(gentoo_dir, util, "install-system-image")
-    put_resource_file(gentoo_dir, util, "expand-rw-layer")
-    put_resource_file(gentoo_dir, util, "do-with-lvm-snapshot")
-    put_resource_file(gentoo_dir, util, "rpmbootstrap.py", "rpmbootstrap")
-
-    done_file = os.path.join(gentoo_dir, ".done")
-    done_file_time = os.stat(done_file).st_mtime if os.path.isfile(done_file) else None
+    put_resource_file(gentoo_dir, util, "build-kernel.py", "usr/local/sbin/build-kernel", True)
+    put_resource_file(gentoo_dir, util, "install-system-image", "usr/sbin/install-system-image", True)
+    put_resource_file(gentoo_dir, util, "expand-rw-layer", "usr/sbin/expand-rw-layer", True)
+    put_resource_file(gentoo_dir, util, "do-with-lvm-snapshot", "usr/sbin/do-with-lvm-snapshot", True)
+    put_resource_file(gentoo_dir, util, "rpmbootstrap.py", "usr/sbin/rpmbootstrap", True)
 
     cache_dir = os.path.join(arch_workdir, "profiles", profile, "cache")
     os.makedirs(cache_dir, exist_ok=True)
@@ -165,6 +160,9 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     if bash: 
         print("Entering shell... 'exit 1' to abort the process.")
         lower_exec(gentoo_dir, cache_dir, ["bash"])
+
+    done_file = os.path.join(gentoo_dir, ".done")
+    done_file_time = os.stat(done_file).st_mtime if os.path.isfile(done_file) else None
 
     portage_time = os.stat(os.path.join(repos_dir, "metadata/timestamp")).st_mtime
     newest_file = max(newest_file, portage_time)

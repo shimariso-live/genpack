@@ -1,8 +1,6 @@
 import os,argparse,subprocess,tempfile
 
-def sudo(cmdline):
-    if os.geteuid() == 0: return cmdline
-    return ["sudo"] + cmdline
+from sudo import sudo,Tee
 
 class Loopback():
     def __init__(self, backing):
@@ -24,16 +22,6 @@ class Tmpmount():
     def __exit__(self, exception_type, exception_value, traceback):
         subprocess.check_call(sudo(["umount", self.tempdir.name]))
         self.tempdir.cleanup()
-
-class Tee():
-    def __init__(self, filename):
-        self.filename = filename
-    def __enter__(self):
-        self.process = subprocess.Popen(sudo(["tee", self.filename]), stdin=subprocess.PIPE, stdout=subprocess.DEVNULL)
-        return self.process.stdin
-    def __exit__(self, exception_type, exception_value, traceback):
-        self.process.stdin.close()
-        self.process.wait()
 
 def run(rootfs_file, disk_image, drm=False):
     with open(disk_image, "w") as f:
