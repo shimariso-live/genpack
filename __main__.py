@@ -237,6 +237,7 @@ def build_artifact(profile, artifact, gentoo_dir, upper_dir, build_json):
     copy(gentoo_dir, upper_dir, files)
     copyup_gcc_libs(gentoo_dir, upper_dir)
     remove_root_password(upper_dir)
+    make_ld_so_conf_latest(upper_dir)
     create_default_iptables_rules(upper_dir)
 
     # per-package setup
@@ -395,6 +396,9 @@ def copyup_gcc_libs(gentoo_dir, upper_dir):
 
 def remove_root_password(root_dir):
     subprocess.check_call(sudo(["sed", "-i", r"s/^root:\*:/root::/", os.path.join(root_dir, "etc/shadow") ]))
+
+def make_ld_so_conf_latest(root_dir):
+    subprocess.check_call(sudo(["touch", os.path.join(root_dir, "etc/ld.so.conf") ]))
 
 def create_default_iptables_rules(root_dir):
     subprocess.check_call(sudo(["touch", os.path.join(root_dir, "var/lib/iptables/rules-save"), os.path.join(root_dir, "var/lib/ip6tables/rules-save")]))
