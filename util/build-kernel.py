@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-import os,argparse,subprocess
+import os,argparse,subprocess,glob
 
 KERNCACHE="/var/cache/genkernel/kerncache.tar.gz"
 GENERATED_KERNEL_CONFIG="/etc/kernels/kernel-config"
@@ -30,7 +30,9 @@ def main(kernelpkg,config,nocache=False,menuconfig=False):
 
     update_kernel_config(config)
     
-    subprocess.check_call(["emerge", "--depclean", kernelpkg])
+    # cleanup
+    for old in glob.glob("/boot/*.old"):
+        os.unlink(old)
     subprocess.check_call(["eclean-kernel", "-n", "1"])
 
 if __name__ == "__main__":
