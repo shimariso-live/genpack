@@ -36,7 +36,7 @@ class MySQL:
             "--log-error=/tmp/mysqld.err", "--socket=%s" % self.socket])
         print("Waiting for MySQL to start...")
         self.wait_for_mysql_to_be_up()
-        print("MySQL startded.")
+        print("MySQL started.")
 
         return self.mysql
 
