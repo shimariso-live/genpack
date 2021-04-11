@@ -31,9 +31,9 @@ class MySQL:
             shutil.chown(socket_dir, user="mysql", group="mysql")
 
         self.mysql = subprocess.Popen([MYSQLD, 
-            "--skip-networking", "--user=mysql", "--log_error_verbosity=1", "--basedir=/usr", 
+            "--no-defaults", "--skip-networking", "--user=mysql", "--log_error_verbosity=1", "--basedir=/usr", 
             "--datadir=%s" % self.datadir, "--max_allowed_packet=8M", "--net_buffer_length=16K",
-            "--socket=%s" % self.socket])
+            "--log-error=/tmp/mysqld.err", "--socket=%s" % self.socket])
         print("Waiting for MySQL to start...")
         self.wait_for_mysql_to_be_up()
         print("MySQL startded.")
@@ -56,7 +56,7 @@ def main(datadir, socket, commands):
     new_data = False
     if not os.path.isdir(os.path.join(datadir, "mysql")):
         print("MySQL has not been initialized yet.  Initializing...")
-        subprocess.check_call([MYSQLD, "--initialize-insecure", "--user=mysql", "--datadir=%s" % datadir])
+        subprocess.check_call([MYSQLD, "--log-error=/tmp/mysqld.err", "--initialize-insecure", "--user=mysql", "--datadir=%s" % datadir])
         new_data = True
 
     with MySQL(datadir, socket) as mysql:
