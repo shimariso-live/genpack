@@ -187,7 +187,7 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     upper_dir = os.path.join(arch_workdir, "artifacts", artifact)
     genpack_metadata_dir = os.path.join(upper_dir, ".genpack")
     if not os.path.exists(genpack_metadata_dir) or os.stat(genpack_metadata_dir).st_mtime < max(os.stat(done_file).st_mtime, get_newest_mtime(artifact_dir), get_newest_mtime(os.path.join(".", "packages"))):
-        build_artifact(profile, artifact, gentoo_dir, upper_dir, build_json)
+        build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_json)
 
     # final output
     if outfile is None:
@@ -202,7 +202,7 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
         pack(upper_dir, outfile)
     return outfile
 
-def build_artifact(profile, artifact, gentoo_dir, upper_dir, build_json):
+def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_json):
     artifact_pkgs = ["util-linux","timezone-data","bash","nano","openssh", "sed", "gawk", "wget", "curl", "rsync", "coreutils", "procps", "net-tools", 
         "iproute2", "iputils", "dbus", "python"]
     if build_json and "packages" in build_json:
@@ -261,11 +261,15 @@ def build_artifact(profile, artifact, gentoo_dir, upper_dir, build_json):
         services += build_json["services"]
     enable_services(upper_dir, services)
 
+    # artifact specific setup
     artifact_dir = os.path.join(".", "artifacts", artifact)
     newest_artifact_file = max(newest_pkg_file, sync_files(artifact_dir, upper_dir))
     if os.path.isfile(os.path.join(upper_dir, "build")):
         print("Building artifact...")
-        subprocess.check_call(sudo(["systemd-nspawn", "-q", "-M", CONTAINER_NAME, "-D", gentoo_dir, "--overlay=+/:%s:/" % os.path.abspath(upper_dir), "/build" ]))
+        subprocess.check_call(sudo(["systemd-nspawn", "-q", "-M", CONTAINER_NAME, "-D", gentoo_dir, 
+            "--overlay=+/:%s:/" % os.path.abspath(upper_dir), 
+            "--bind=%s:/var/cache" % os.path.abspath(cache_dir),
+            "/build" ]))
     else:
         print("Artifact build script not found.")
     subprocess.check_call(sudo(["rm", "-rf", os.path.join(upper_dir, "build"), os.path.join(upper_dir,"build.json"), os.path.join(upper_dir,"usr/src")]))
@@ -320,12 +324,60 @@ def get_package_set(gentoo_dir, set_name):
             if line != "": pkgs.append(line)
     return pkgs
 
+def split_rdepend(line):
+    if line.startswith("|| ( "):
+        idx = 5
+        level = 0
+        while idx < len(line):
+            ch = line[idx]
+            if ch == '(': level += 1
+            elif ch == ')':
+                if level == 0:
+                    idx += 1
+                    break
+                else: level -= 1
+            idx += 1
+        leftover = line[idx:].strip()
+        return (line[:idx], None if leftover == "" else leftover)
+
+    #else:
+    splitted = line.split(' ', 1)
+    if len(splitted) == 1: return (splitted[0],None)
+    #else
+    return (splitted[0], splitted[1])
+
+def parse_rdepend_line(line, make_optional=False):
+    p = []
+    while line is not None and line.strip() != "":
+        splitted = split_rdepend(line)
+        p.append(splitted[0])
+        line = splitted[1]
+
+    pkgs = set()
+    for pkg in p:
+        m = re.match(r"\|\| \( (.+) \)", pkg)
+        if m:
+            pkgs |= parse_rdepend_line(m.group(1), True)
+            continue
+        if pkg[0] == '!': continue
+        if pkg[0] == '~': pkg = pkg[1:]
+        #else
+        pkg_stripped = strip_ver(re.sub(r':.+$', "", re.sub(r'\[.+\]$', "", re.sub(r'^(<=|>=|=|<|>)', "", pkg))))
+        pkgs.add('?' + pkg_stripped if make_optional else pkg_stripped)
+    return pkgs
+
 def scan_pkg_dep(gentoo_dir, pkg_map, pkgnames, pkgs = set()):
     for pkgname in pkgnames:
         if pkgname[0] == '@':
             scan_pkg_dep(gentoo_dir, pkg_map, get_package_set(gentoo_dir, pkgname[1:]), pkgs)
             continue
-        if pkgname not in pkg_map: raise BaseException("Package %s not found" % pkgname)
+        optional = False
+        if pkgname[0] == '?': 
+            optional = True
+            pkgname = pkgname[1:]
+        if pkgname not in pkg_map:
+            if optional: continue
+            else: raise BaseException("Package %s not found" % pkgname)
         if len(pkg_map[pkgname]) > 1: raise BaseException("Package %s is ambigious" % pkgname)
         cat_pn = pkg_map[pkgname][0]
         cat_pn_wo_ver = strip_ver(cat_pn)
@@ -336,14 +388,8 @@ def scan_pkg_dep(gentoo_dir, pkg_map, pkgnames, pkgs = set()):
         if os.path.isfile(rdepend_file):
             with open(rdepend_file) as f:
                 line = f.read().strip()
-                line = re.sub(r'\|\| \( .+ \) ?', "", line)
                 if len(line) > 0:
-                    rdepend_pkgnames = set()
-                    for pkg in line.split(' '):
-                        if pkg[0] == '!': continue
-                        if pkg[0] == '~': pkg = pkg[1:]
-                        pkg_stripped = strip_ver(re.sub(r':.+$', "", re.sub(r'\[.+\]$', "", re.sub(r'^(<=|>=|=|<|>)', "", pkg))))
-                        rdepend_pkgnames.add(pkg_stripped)
+                    rdepend_pkgnames = parse_rdepend_line(line)
                     if len(rdepend_pkgnames) > 0: scan_pkg_dep(gentoo_dir, pkg_map, rdepend_pkgnames, pkgs)
 
     return pkgs
