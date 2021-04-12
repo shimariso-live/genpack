@@ -481,13 +481,26 @@ if __name__ == "__main__":
     parser.add_argument("--qemu", action="store_true", default=False, help="Run generated rootfs using qemu")
     parser.add_argument("--drm", action="store_true", default=False, help="Enable DRM(virgl) when running qemu")
     parser.add_argument("--profile", default=None, help="Override profile")
-    parser.add_argument("artifact", default="default", nargs='?', help="Artifact to build")
+    parser.add_argument("artifact", default=[], nargs='*', help="Artifacts to build")
     args = parser.parse_args()
-    if args.artifact == "clean":
-        clean(args.workdir, arch, args.profile)
-    else:
-        outfile = main(args.base, args.workdir, arch, args.sync, args.bash, args.artifact, args.outfile, args.profile)
-        if outfile is not None and args.qemu:
-            qemu.run(outfile, os.path.join(args.workdir, "qemu.img"), args.drm)
 
-    print("Done.")
+    artifacts = []
+    if len(args.artifact) == 0:
+        for i in os.listdir("./artifacts"):
+            if os.path.isdir(os.path.join("./artifacts", i)): artifacts.append(i)
+    else:
+        artifacts += args.artifact
+    
+    if len(artifacts) == 0: artifacts.append("default")
+
+    for artifact in artifacts:
+        if artifact != "default" and not os.path.isdir(os.path.join("./artifacts", artifact)):
+            raise BaseException("No such artifact: %s" % artifact)
+        print("Processing artifact %s..." % artifact)
+        if args.artifact == "clean":
+            clean(args.workdir, arch, args.profile)
+        else:
+            outfile = main(args.base, args.workdir, arch, args.sync, args.bash, artifact, args.outfile, args.profile)
+            if outfile is not None and args.qemu:
+                qemu.run(outfile, os.path.join(args.workdir, "qemu.img"), args.drm)
+        print("Done.")
