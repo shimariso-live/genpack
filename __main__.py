@@ -437,10 +437,11 @@ def process_pkgs(gentoo_dir, packages_dir, pkgs):
     return files
 
 def copy(gentoo_dir, upper_dir, files):
-    if not gentoo_dir.endswith('/'):
-        gentoo_dir += '/'
+    if not gentoo_dir.endswith('/'): gentoo_dir += '/'
+    # files / dirs to shallow copy
     rsync = subprocess.Popen(sudo(["rsync", "-lptgoD", "--keep-dirlinks", "--files-from=-", gentoo_dir, upper_dir]), stdin=subprocess.PIPE)
     for f in files:
+        if f.endswith("/."): continue
         f_wo_leading_slash = re.sub(r'^/', "", f)
         rsync.stdin.write(encode_utf8(f_wo_leading_slash + '\n'))
         src_path = os.path.join(gentoo_dir, f_wo_leading_slash)
@@ -448,6 +449,16 @@ def copy(gentoo_dir, upper_dir, files):
             link = os.readlink(src_path)
             target = link[1:] if link[0] == '/' else os.path.join(os.path.dirname(f_wo_leading_slash), link)
             rsync.stdin.write(encode_utf8(target + '\n'))
+    rsync.stdin.close()
+    if rsync.wait() != 0: raise BaseException("rsync returned error code.")
+
+    # dirs to deep copy
+    rsync = subprocess.Popen(sudo(["rsync", "-a", "--keep-dirlinks", "--files-from=-", gentoo_dir, upper_dir]), stdin=subprocess.PIPE)
+    for f in files:
+        if not f.endswith("/."): continue
+        f_wo_leading_slash = re.sub(r'^/', "", f)
+        rsync.stdin.write(encode_utf8(f_wo_leading_slash + '\n'))
+        src_path = os.path.join(gentoo_dir, f_wo_leading_slash)
     rsync.stdin.close()
     if rsync.wait() != 0: raise BaseException("rsync returned error code.")
 
