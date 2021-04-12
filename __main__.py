@@ -370,7 +370,8 @@ def parse_rdepend_line(line, make_optional=False):
         pkgs.add('?' + pkg_stripped if make_optional else pkg_stripped)
     return pkgs
 
-def scan_pkg_dep(gentoo_dir, pkg_map, pkgnames, pkgs = set()):
+def scan_pkg_dep(gentoo_dir, pkg_map, pkgnames, pkgs = None):
+    if pkgs is None: pkgs = set()
     for pkgname in pkgnames:
         if pkgname[0] == '@':
             scan_pkg_dep(gentoo_dir, pkg_map, get_package_set(gentoo_dir, pkgname[1:]), pkgs)
