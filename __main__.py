@@ -72,10 +72,11 @@ def link_files(srcdir, dstdir):
     
     return newest_file
 
-def sync_files(srcdir, dstdir):
+def sync_files(srcdir, dstdir, exclude=None):
     files_to_sync, newest_file = scan_files(srcdir)
 
     for f in files_to_sync:
+        if exclude is not None and re.match(exclude, f): continue
         src = os.path.join(srcdir, f)
         dst = os.path.join(dstdir, f)
         if not os.path.isfile(dst) or os.stat(src).st_mtime > os.stat(dst).st_mtime:
@@ -214,7 +215,8 @@ def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_js
 
     pkg_map = collect_packages(gentoo_dir)
     pkgs = scan_pkg_dep(gentoo_dir, pkg_map, artifact_pkgs)
-    files = process_pkgs(gentoo_dir, pkgs)
+    packages_dir = os.path.join(".", "packages")
+    files = process_pkgs(gentoo_dir, packages_dir, pkgs)
     if os.path.isfile(os.path.join(gentoo_dir, "boot/kernel")): files.append("/boot/kernel")
     if os.path.isfile(os.path.join(gentoo_dir, "boot/initramfs")): files.append("/boot/initramfs")
     if os.path.isdir(os.path.join(gentoo_dir, "lib/modules")): files.append("/lib/modules/.")
@@ -249,13 +251,15 @@ def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_js
     newest_pkg_file = 0
     for pkg in pkgs:
         pkg_wo_ver = strip_ver(pkg)
-        package_dir = os.path.join(".", "packages", pkg_wo_ver)
+        package_dir = os.path.join(packages_dir, pkg_wo_ver)
         if not os.path.isdir(package_dir): continue
         #else
         print("Processing package %s..." % pkg_wo_ver)
-        newest_pkg_file = max(newest_pkg_file, sync_files(package_dir, upper_dir))
+        newest_pkg_file = max(newest_pkg_file, sync_files(package_dir, upper_dir, r"^CONTENTS(\.|$)"))
         if os.path.isfile(os.path.join(upper_dir, "pkgbuild")):
-            subprocess.check_call(sudo(["systemd-nspawn", "-q", "-M", CONTAINER_NAME, "-D", gentoo_dir, "--overlay=+/:%s:/" % os.path.abspath(upper_dir), "-E", "PROFILE=%s" % profile, "-E", "ARTIFACT=%s" % artifact, "sh", "-c", "/pkgbuild && rm /pkgbuild" ]))
+            subprocess.check_call(sudo(["systemd-nspawn", "-q", "-M", CONTAINER_NAME, "-D", gentoo_dir, "--overlay=+/:%s:/" % os.path.abspath(upper_dir), 
+                "-E", "PROFILE=%s" % profile, "-E", "ARTIFACT=%s" % artifact, 
+                "sh", "-c", "/pkgbuild && rm -f /pkgbuild" ]))
 
     # enable services
     services = ["sshd","systemd-networkd", "systemd-resolved"]
@@ -411,15 +415,19 @@ def is_path_excluded(path):
             raise Exception("Unknown type")
     return False
 
-def process_pkgs(gentoo_dir, pkgs):
+def process_pkgs(gentoo_dir, packages_dir, pkgs):
     files = []
     for pkg in pkgs:
         contents_file = os.path.join(gentoo_dir, "var/db/pkg" , pkg, "CONTENTS")
+        overridden_contents_file = os.path.join(packages_dir, strip_ver(pkg), "CONTENTS")
+        if os.path.isfile(os.path.join(overridden_contents_file)):
+            contents_file = overridden_contents_file
         if not os.path.isfile(contents_file): continue
         #else
         with open(contents_file) as f:
             while line := f.readline():
-                line = line.strip()
+                line = re.sub(r'#.*$', "", line).strip()
+                if line == "": continue
                 file_to_append = None
                 if line.startswith("obj "): 
                     file_to_append = re.sub(r' [0-9a-f]+ [0-9]+$', "", line[4:])
@@ -486,7 +494,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     artifacts = []
-    if len(args.artifact) == 0:
+    if len(args.artifact) == 0 and os.path.isdir("./artifacts"):
         for i in os.listdir("./artifacts"):
             if os.path.isdir(os.path.join("./artifacts", i)): artifacts.append(i)
     else:
