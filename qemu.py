@@ -40,8 +40,8 @@ def run(rootfs_file, disk_image, drm=False):
             subprocess.check_call(sudo(["cp", rootfs_file, os.path.join(mountpoint, "system.img")]))
     
     qemu_cmdline = ["qemu-system-x86_64", "-enable-kvm", "-M", "q35", "-drive", "file=%s,format=raw,index=0,media=disk,if=virtio" % disk_image,
-        "-rtc", "base=utc,clock=rt", "-m", "4096", "-vga", "virtio", "-no-shutdown"]
-    if drm: qemu_cmdline += ["-display", "gtk,gl=on",]
+        "-rtc", "base=utc,clock=rt", "-m", "4096", "-no-shutdown"]
+    if drm: qemu_cmdline += ["-display", "gtk,gl=on", "-vga", "virtio"]
     subprocess.check_call(qemu_cmdline)
 
 if __name__ == "__main__":
