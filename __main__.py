@@ -453,7 +453,7 @@ def copy(gentoo_dir, upper_dir, files):
     if rsync.wait() != 0: raise BaseException("rsync returned error code.")
 
     # dirs to deep copy
-    rsync = subprocess.Popen(sudo(["rsync", "-a", "--keep-dirlinks", "--files-from=-", gentoo_dir, upper_dir]), stdin=subprocess.PIPE)
+    rsync = subprocess.Popen(sudo(["rsync", "-ar", "--keep-dirlinks", "--files-from=-", gentoo_dir, upper_dir]), stdin=subprocess.PIPE)
     for f in files:
         if not f.endswith("/."): continue
         f_wo_leading_slash = re.sub(r'^/', "", f)
