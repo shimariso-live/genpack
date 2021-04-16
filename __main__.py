@@ -65,10 +65,9 @@ def link_files(srcdir, dstdir):
     for f in files_to_link:
         src = os.path.join(srcdir, f)
         dst = os.path.join(dstdir, f)
-        if not os.path.isfile(dst) or os.stat(src).st_mtime > os.stat(dst).st_mtime:
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            if os.path.isfile(dst): os.unlink(dst)
-            os.link(src, dst)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        if os.path.isfile(dst): os.unlink(dst)
+        os.link(src, dst)
     
     return newest_file
 
@@ -79,8 +78,7 @@ def sync_files(srcdir, dstdir, exclude=None):
         if exclude is not None and re.match(exclude, f): continue
         src = os.path.join(srcdir, f)
         dst = os.path.join(dstdir, f)
-        if not os.path.isfile(dst) or os.stat(src).st_mtime > os.stat(dst).st_mtime:
-            subprocess.check_call(sudo(["rsync", "-k", "-R", "--chown=root:root", os.path.join(srcdir, ".", f), dstdir]))
+        subprocess.check_call(sudo(["rsync", "-k", "-R", "--chown=root:root", os.path.join(srcdir, ".", f), dstdir]))
     
     return newest_file
 
