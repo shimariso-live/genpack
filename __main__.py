@@ -188,8 +188,8 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     ##### building profile done
     ##### build artifact if necessary
     upper_dir = os.path.join(arch_workdir, "artifacts", artifact)
-    genpack_metadata_dir = os.path.join(upper_dir, ".genpack")
-    if not os.path.exists(genpack_metadata_dir) or os.stat(genpack_metadata_dir).st_mtime < max(os.stat(done_file).st_mtime, get_newest_mtime(artifact_dir), get_newest_mtime(os.path.join(".", "packages"))):
+    genpack_packages_file = os.path.join(upper_dir, ".genpack", "packages") # use its timestamp as build date
+    if not os.path.exists(genpack_packages_file) or os.stat(genpack_packages_file).st_mtime < max(os.stat(done_file).st_mtime, get_newest_mtime(artifact_dir), get_newest_mtime(os.path.join(".", "packages"))):
         build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_json)
 
     # final output
@@ -201,7 +201,7 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
         subprocess.check_call(sudo(["systemd-nspawn", "-M", CONTAINER_NAME, "-q", "-D", upper_dir, "--network-veth", "-b"]))
         return None
     #else
-    if not os.path.isfile(outfile) or os.stat(genpack_metadata_dir).st_mtime > os.stat(outfile).st_mtime:
+    if not os.path.isfile(outfile) or os.stat(genpack_packages_file).st_mtime > os.stat(outfile).st_mtime:
         pack(upper_dir, outfile)
     return outfile
 
@@ -283,9 +283,8 @@ def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_js
     subprocess.check_call(sudo(["rm", "-rf", os.path.join(upper_dir, "build"), os.path.join(upper_dir,"build.json"), os.path.join(upper_dir,"usr/src")]))
 
     # generate metadata
-    # TODO: use tee
     genpack_metadata_dir = os.path.join(upper_dir, ".genpack")
-    subprocess.check_call(sudo(["mkdir", genpack_metadata_dir]))
+    subprocess.check_call(sudo(["mkdir", "-p", genpack_metadata_dir]))
     subprocess.check_call(sudo(["chmod", "o+rwx", genpack_metadata_dir]))
     with open(os.path.join(genpack_metadata_dir, "profile"), "w") as f:
         f.write(profile)
