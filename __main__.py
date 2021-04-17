@@ -152,6 +152,7 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     put_resource_file(gentoo_dir, util, "expand-rw-layer", "usr/sbin/expand-rw-layer", True)
     put_resource_file(gentoo_dir, util, "do-with-lvm-snapshot", "usr/sbin/do-with-lvm-snapshot", True)
     put_resource_file(gentoo_dir, util, "rpmbootstrap.py", "usr/sbin/rpmbootstrap", True)
+    put_resource_file(gentoo_dir, util, "genbootstrap.py", "usr/sbin/genbootstrap", True)
 
     cache_dir = os.path.join(arch_workdir, "profiles", profile, "cache")
     os.makedirs(cache_dir, exist_ok=True)
@@ -223,6 +224,7 @@ def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_js
     files += ["/etc/ld.so.conf", "/etc/ld.so.conf.d/."]
     files += ["/usr/lib/locale/locale-archive"]
     files += ["/bin/sh", "/bin/sed", "/usr/bin/awk", "/usr/bin/python", "/usr/bin/vi", "/usr/bin/nano", 
+        "/bin/tar", "/usr/bin/unzip",
         "/usr/bin/wget", "/usr/bin/curl", "/usr/bin/rsync", "/usr/sbin/tcpdump", "/usr/bin/telnet",
         "/usr/bin/make", "/usr/bin/diff", "/usr/bin/strings", "/usr/bin/strace", 
         "/usr/bin/find", "/usr/bin/xargs", "/usr/bin/less"]
