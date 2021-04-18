@@ -114,7 +114,10 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     stage3_tarball = os.path.join(arch_workdir, "stage3.tar.xz")
     portage_tarball = os.path.join(workdir, "portage.tar.xz")
 
-    gentoo_dir = os.path.join(arch_workdir, "profiles", profile, "root")
+    profile_workdir = os.path.join(arch_workdir, "profiles", profile)
+    cache_dir = os.path.join(profile_workdir, "cache")
+    gentoo_dir = os.path.join(profile_workdir, "root")
+
     repos_dir = os.path.join(gentoo_dir, "var/db/repos/gentoo")
     usr_local_dir = os.path.join(gentoo_dir, "usr/local")
 
@@ -137,13 +140,21 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
         subprocess.check_call(sudo(["tar", "xpf", portage_tarball, "--strip-components=1", "-C", repos_dir]))
         kernel_config_dir = os.path.join(gentoo_dir, "etc/kernels")
         subprocess.check_call(sudo(["mkdir", "-p", kernel_config_dir]))
-        subprocess.check_call(sudo(["chmod", "-R", "o+rw", os.path.join(gentoo_dir, "etc/portage"), os.path.join(gentoo_dir, "usr/src"), os.path.join(gentoo_dir, "var/db/repos"), kernel_config_dir, usr_local_dir]))
+        subprocess.check_call(sudo(["chmod", "-R", "o+rw", 
+            os.path.join(gentoo_dir, "etc/portage"), os.path.join(gentoo_dir, "usr/src"), 
+            os.path.join(gentoo_dir, "var/db/repos"), os.path.join(gentoo_dir, "var/cache"), 
+            kernel_config_dir, usr_local_dir]))
         with open(os.path.join(gentoo_dir, "etc/portage/make.conf"), "a") as f:
             f.write('FEATURES="-sandbox -usersandbox -network-sandbox"\n')
         with open(stage3_done_file, "w") as f:
             pass
 
     newest_file = link_files(os.path.join(".", "profiles", profile), gentoo_dir)
+
+    # move files under /var/cache
+    os.makedirs(cache_dir, exist_ok=True)
+    subprocess.check_call(sudo(["rsync", "-a", "--remove-source-files", os.path.join(gentoo_dir,"var/cache/"), cache_dir]))
+
     put_resource_file(gentoo_dir, initlib, "initlib.cpp")
     put_resource_file(gentoo_dir, initlib, "initlib.h")
     put_resource_file(gentoo_dir, initlib, "fat.cpp")
@@ -155,9 +166,6 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     put_resource_file(gentoo_dir, util, "do-with-lvm-snapshot", "usr/sbin/do-with-lvm-snapshot", True)
     put_resource_file(gentoo_dir, util, "rpmbootstrap.py", "usr/sbin/rpmbootstrap", True)
     put_resource_file(gentoo_dir, util, "genbootstrap.py", "usr/sbin/genbootstrap", True)
-
-    cache_dir = os.path.join(arch_workdir, "profiles", profile, "cache")
-    os.makedirs(cache_dir, exist_ok=True)
 
     if sync: lower_exec(gentoo_dir, cache_dir, ["emerge", "--sync"])
     if bash: 
