@@ -301,12 +301,17 @@ int create_zero_filled_file(const std::filesystem::path& path, off_t length)
   return rst;
 }
 
+int mkfs_btrfs(const std::filesystem::path& imagefile)
+{
+  return fork_exec_wait(MKFS_BTRFS, MKFS_BTRFS, "-f", "-q", imagefile.c_str(), NULL);
+}
+
 int create_btrfs_imagefile(const std::filesystem::path& imagefile, off_t length)
 {
   int rst = create_zero_filled_file(imagefile, length);
   if (rst != 0) return rst;
   // else
-  return fork_exec_wait(MKFS_BTRFS, MKFS_BTRFS, "-f", "-q", imagefile.c_str(), NULL);
+  return mkfs_btrfs(imagefile);
 }
 
 int repair_btrfs(const std::filesystem::path& path)
@@ -324,12 +329,17 @@ int btrfs_scan()
   return fork_exec_wait(BTRFS, BTRFS, "device", "scan", NULL);
 }
 
+int mkswap(const std::filesystem::path& swapfile)
+{
+  return fork_exec_wait(MKSWAP, MKSWAP, swapfile.c_str(), NULL);
+}
+
 int create_swapfile(const std::filesystem::path& swapfile, off_t length)
 {
   int rst = create_zero_filled_file(swapfile, length);
   if (rst < 0) return rst;
   //else
-  return fork_exec_wait(MKSWAP, MKSWAP, swapfile.c_str(), NULL);
+  return mkswap(swapfile);
 }
 
 int swapon(const std::filesystem::path& swapfile,bool mkswap_and_retry_on_fail/* = true*/)

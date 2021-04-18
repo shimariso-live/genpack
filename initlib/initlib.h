@@ -35,10 +35,12 @@ int umount(const std::filesystem::path& mountpoint);
 int bind_mount(std::filesystem::path source, std::filesystem::path mountpoint);
 int repair_fat(const std::filesystem::path& path);
 uint64_t get_free_disk_space(const std::filesystem::path& mountpoint);
+int mkfs_btrfs(const std::filesystem::path& imagefile);
 int create_btrfs_imagefile(const std::filesystem::path& imagefile, off_t length);
 int enable_lvm();
 int btrfs_scan();
 int repair_btrfs(const std::filesystem::path& path);
+int mkswap(const std::filesystem::path& swapfile);
 int create_swapfile(const std::filesystem::path& swapfile, off_t length);
 int swapon(const std::filesystem::path& swapfile, bool mkswap_and_retry_on_fail = true);
 
