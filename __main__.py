@@ -146,6 +146,8 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     newest_file = link_files(os.path.join(".", "profiles", profile), gentoo_dir)
     put_resource_file(gentoo_dir, initlib, "initlib.cpp")
     put_resource_file(gentoo_dir, initlib, "initlib.h")
+    put_resource_file(gentoo_dir, initlib, "fat.cpp")
+    put_resource_file(gentoo_dir, initlib, "fat.h")
     put_resource_file(gentoo_dir, util, "build-kernel.py", "usr/local/sbin/build-kernel", True)
     put_resource_file(gentoo_dir, util, "with-mysql.py", "usr/local/sbin/with-mysql", True)
     put_resource_file(gentoo_dir, util, "install-system-image", "usr/sbin/install-system-image", True)
