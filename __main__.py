@@ -216,7 +216,7 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
 
 def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_json):
     artifact_pkgs = ["gentoo-systemd-integration", "util-linux","timezone-data","bash","openssh", "coreutils", "procps", "net-tools", 
-        "iproute2", "iputils", "dbus", "python", "rsync"]
+        "iproute2", "iputils", "dbus", "python", "rsync", "ca-certificates"]
     if build_json and "packages" in build_json:
         if not isinstance(build_json["packages"], list): raise Exception("packages must be list")
         #else
