@@ -2,7 +2,7 @@
 # Copyright (c) 2021 Walbrix Corporation
 # https://github.com/wbrxcorp/genpack/blob/main/LICENSE
 
-import os,re,argparse,subprocess,glob,json
+import os,re,argparse,subprocess,glob,json,uuid
 import importlib.resources
 import urllib.request
 
@@ -121,6 +121,8 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     repos_dir = os.path.join(gentoo_dir, "var/db/repos/gentoo")
     usr_local_dir = os.path.join(gentoo_dir, "usr/local")
 
+    trash_dir = os.path.join(workdir, "trash")
+
     if not os.path.isfile(stage3_tarball) or os.path.getsize(stage3_tarball) != get_content_length(stage3_tarball_url):
         subprocess.check_call(["wget", "-O", stage3_tarball, stage3_tarball_url])
     
@@ -131,8 +133,8 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     stage3_done_file_time = os.stat(stage3_done_file).st_mtime if os.path.isfile(stage3_done_file) else None
     if not stage3_done_file_time or stage3_done_file_time < os.stat(stage3_tarball).st_mtime:
         if os.path.isdir(gentoo_dir):
-            print("Cleaning up existing gentoo tree...")
-            subprocess.check_call(sudo(["rm", "-rf", gentoo_dir]))
+            os.makedirs(trash_dir, exist_ok=True)
+            os.rename(gentoo_dir, os.path.join(trash_dir, str(uuid.uuid4())))
         os.makedirs(repos_dir, exist_ok=True)
         print("Extracting stage3...")
         subprocess.check_call(sudo(["tar", "xpf", stage3_tarball, "--strip-components=1", "-C", gentoo_dir]))
@@ -199,6 +201,9 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     upper_dir = os.path.join(arch_workdir, "artifacts", artifact)
     genpack_packages_file = os.path.join(upper_dir, ".genpack", "packages") # use its timestamp as build date
     if not os.path.exists(genpack_packages_file) or os.stat(genpack_packages_file).st_mtime < max(os.stat(done_file).st_mtime, get_newest_mtime(artifact_dir), get_newest_mtime(os.path.join(".", "packages"))):
+        if os.path.isdir(upper_dir):
+            os.makedirs(trash_dir, exist_ok=True)
+            subprocess.check_call(sudo(["mv", upper_dir, os.path.join(trash_dir, str(uuid.uuid4()))]))
         build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_json)
 
     # final output
@@ -245,9 +250,6 @@ def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_js
         #else
         files += build_json["files"]
 
-    if os.path.isdir(upper_dir):
-        print("Deleting previous artifact dir...")
-        subprocess.check_call(sudo(["rm", "-rf", upper_dir]))
     os.makedirs(os.path.dirname(upper_dir), exist_ok=True)
     subprocess.check_call(sudo(["mkdir", upper_dir]))
     print("Copying files to artifact dir...")
@@ -396,8 +398,13 @@ def scan_pkg_dep(gentoo_dir, pkg_map, pkgnames, pkgs = None):
         if pkgname not in pkg_map:
             if optional: continue
             else: raise BaseException("Package %s not found" % pkgname)
-        if len(pkg_map[pkgname]) > 1: raise BaseException("Package %s is ambigious" % pkgname)
-        cat_pn = pkg_map[pkgname][0]
+        if len(pkg_map[pkgname]) == 1:
+            cat_pn = pkg_map[pkgname][0]
+        else:
+            pkg_candidates = list(filter(lambda x: not(x.startswith("acct-user/") or x.startswith("acct-group/") or x.startswith("virtual/")), pkg_map[pkgname]))
+            if len(pkg_candidates) == 1: cat_pn = pkg_candidates[0]
+            else: raise BaseException("Package %s is ambigious" % pkgname)
+
         cat_pn_wo_ver = strip_ver(cat_pn)
         if cat_pn in pkgs: continue # already exists
 
@@ -533,3 +540,8 @@ if __name__ == "__main__":
             if outfile is not None and args.qemu:
                 qemu.run(outfile, os.path.join(args.workdir, "qemu.img"), args.drm)
         print("Done.")
+    
+    trash_dir = os.path.join(args.workdir, "trash")
+    if os.path.isdir(trash_dir):
+        print("Cleaning up...")
+        subprocess.check_call(sudo(["rm", "-rf", trash_dir]))
