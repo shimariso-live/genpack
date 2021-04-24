@@ -216,7 +216,8 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
         return None
     #else
     if not os.path.isfile(outfile) or os.stat(genpack_packages_file).st_mtime > os.stat(outfile).st_mtime:
-        pack(upper_dir, outfile)
+        compression = build_json["compression"] if build_json and "compression" in build_json else "gzip"
+        pack(upper_dir, outfile, compression)
     return outfile
 
 def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_json):
@@ -494,8 +495,13 @@ def enable_services(root_dir, services):
     if not isinstance(services, list): services = [services]
     subprocess.check_call(sudo(["systemd-nspawn", "-q", "-M", CONTAINER_NAME, "-D", root_dir, "systemctl", "enable"] + services))
 
-def pack(upper_dir, outfile):
-    subprocess.check_call(sudo(["mksquashfs", upper_dir, outfile, "-noappend", "-comp", "xz", "-no-exports", "-b", "1M", "-Xbcj", "x86"]))
+def pack(upper_dir, outfile, compression="gzip"):
+    cmdline = ["mksquashfs", upper_dir, outfile, "-noappend"]
+    if compression == "xz": cmdline += ["-comp", "xz", "-no-exports", "-b", "1M", "-Xbcj", "x86"]
+    elif compression == "gzip": cmdline += ["-Xcompression-level", "1"]
+    elif compression == "lzo": cmdline += ["-comp", "lzo"]
+    else: raise BaseException("Unknown compression type %s" % compression)
+    subprocess.check_call(sudo(cmdline))
     subprocess.check_call(sudo(["chown", "%d:%d" % (os.getuid(), os.getgid()), outfile]))
 
 def clean(workdir, arch, profile=None):
