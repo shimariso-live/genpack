@@ -222,7 +222,7 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
 
 def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_json):
     artifact_pkgs = ["gentoo-systemd-integration", "util-linux","timezone-data","bash","openssh", "coreutils", "procps", "net-tools", 
-        "iproute2", "iputils", "dbus", "python", "rsync", "ca-certificates"]
+        "iproute2", "iputils", "dbus", "python", "rsync", "tcpdump", "ca-certificates"]
     if build_json and "packages" in build_json:
         if not isinstance(build_json["packages"], list): raise Exception("packages must be list")
         #else
@@ -241,7 +241,7 @@ def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_js
     files += ["/usr/lib/locale/locale-archive"]
     files += ["/bin/sh", "/bin/sed", "/usr/bin/awk", "/usr/bin/python", "/usr/bin/vi", "/usr/bin/nano", 
         "/bin/tar", "/usr/bin/unzip",
-        "/usr/bin/wget", "/usr/bin/curl", "/usr/sbin/tcpdump", "/usr/bin/telnet",
+        "/usr/bin/wget", "/usr/bin/curl", "/usr/bin/telnet",
         "/usr/bin/make", "/usr/bin/diff", "/usr/bin/strings", "/usr/bin/strace", 
         "/usr/bin/find", "/usr/bin/xargs", "/usr/bin/less"]
     files += ["/sbin/iptables", "/sbin/ip6tables", "/sbin/iptables-restore", "/sbin/ip6tables-restore", "/sbin/iptables-save", "/sbin/ip6tables-save"]
