@@ -45,8 +45,13 @@ def get_content_length(url):
     #else
     return None
 
-def lower_exec(lower_dir, cache_dir, cmdline, nspawn_opts=[]):
-    subprocess.check_call(sudo(["systemd-nspawn", "-q", "-M", CONTAINER_NAME, "-D", lower_dir, "--bind=%s:/var/cache" % os.path.abspath(cache_dir)] + nspawn_opts + cmdline))
+def lower_exec(lower_dir, cache_dir, portage_dir, cmdline, nspawn_opts=[]):
+    subprocess.check_call(sudo(
+        ["systemd-nspawn", "-q", "-M", CONTAINER_NAME, "-D", lower_dir, 
+            "--bind=%s:/var/cache" % os.path.abspath(cache_dir),
+            "--bind-ro=%s:/var/db/repos/gentoo" % os.path.abspath(portage_dir) ]
+            + nspawn_opts + cmdline)
+    )
 
 def scan_files(dir):
     files_found = []
@@ -97,6 +102,28 @@ def load_json_file(path):
     with open(path) as f:
         return json.load(f)
 
+def extract_portage(base, workdir):
+    portage_tarball_url = base + "snapshots/portage-latest.tar.xz"
+    portage_tarball = os.path.join(workdir, "portage.tar.xz")
+    portage_dir = os.path.join(workdir, "portage")
+    trash_dir = os.path.join(workdir, "trash")
+    done_file = os.path.join(portage_dir, ".done")
+
+    if not os.path.isfile(portage_tarball) or os.path.getsize(portage_tarball) != get_content_length(portage_tarball_url):
+        subprocess.check_call(["wget", "-O", portage_tarball, portage_tarball_url])
+        if os.path.exists(done_file): os.remove(done_file)
+
+    if os.path.isdir(portage_dir) and not os.path.exists(done_file):
+        os.makedirs(trash_dir, exist_ok=True)
+        os.rename(portage_dir, os.path.join(trash_dir, str(uuid.uuid4())))
+
+    if not os.path.isdir(portage_dir):
+        os.makedirs(portage_dir, exist_ok=True)
+        print("Extracting portage...")
+        subprocess.check_call(sudo(["tar", "xpf", portage_tarball, "--strip-components=1", "-C", portage_dir]))
+        with open(done_file, "w") as f:
+            pass
+
 def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     artifact_dir = os.path.join(".", "artifacts", artifact)
     build_json = load_json_file(os.path.join(artifact_dir, "build.json"))
@@ -106,13 +133,14 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
         if build_json and "profile" in build_json: profile = build_json["profile"]
 
     stage3_tarball_url = get_latest_stage3_tarball_url(base)
-    portage_tarball_url = base + "snapshots/portage-latest.tar.xz"
+    #portage_tarball_url = base + "snapshots/portage-latest.tar.xz"
 
     arch_workdir = os.path.join(workdir, arch)
     os.makedirs(arch_workdir, exist_ok=True)
 
     stage3_tarball = os.path.join(arch_workdir, "stage3.tar.xz")
-    portage_tarball = os.path.join(workdir, "portage.tar.xz")
+    #portage_tarball = os.path.join(workdir, "portage.tar.xz")
+    portage_dir = os.path.join(workdir, "portage")
 
     profile_workdir = os.path.join(arch_workdir, "profiles", profile)
     cache_dir = os.path.join(profile_workdir, "cache")
@@ -126,8 +154,8 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     if not os.path.isfile(stage3_tarball) or os.path.getsize(stage3_tarball) != get_content_length(stage3_tarball_url):
         subprocess.check_call(["wget", "-O", stage3_tarball, stage3_tarball_url])
     
-    if not os.path.isfile(portage_tarball) or os.path.getsize(portage_tarball) != get_content_length(portage_tarball_url):
-        subprocess.check_call(["wget", "-O", portage_tarball, portage_tarball_url])
+    #if not os.path.isfile(portage_tarball) or os.path.getsize(portage_tarball) != get_content_length(portage_tarball_url):
+    #    subprocess.check_call(["wget", "-O", portage_tarball, portage_tarball_url])
 
     stage3_done_file = os.path.join(gentoo_dir, ".stage3-done")
     stage3_done_file_time = os.stat(stage3_done_file).st_mtime if os.path.isfile(stage3_done_file) else None
@@ -138,8 +166,8 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
         os.makedirs(repos_dir, exist_ok=True)
         print("Extracting stage3...")
         subprocess.check_call(sudo(["tar", "xpf", stage3_tarball, "--strip-components=1", "-C", gentoo_dir]))
-        print("Extracting portage...")
-        subprocess.check_call(sudo(["tar", "xpf", portage_tarball, "--strip-components=1", "-C", repos_dir]))
+        #print("Extracting portage...")
+        #subprocess.check_call(sudo(["tar", "xpf", portage_tarball, "--strip-components=1", "-C", repos_dir]))
         kernel_config_dir = os.path.join(gentoo_dir, "etc/kernels")
         subprocess.check_call(sudo(["mkdir", "-p", kernel_config_dir]))
         subprocess.check_call(sudo(["chmod", "-R", "o+rw", 
@@ -169,30 +197,30 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     put_resource_file(gentoo_dir, util, "rpmbootstrap.py", "usr/sbin/rpmbootstrap", True)
     put_resource_file(gentoo_dir, util, "genbootstrap.py", "usr/sbin/genbootstrap", True)
 
-    if sync: lower_exec(gentoo_dir, cache_dir, ["emerge", "--sync"])
+    if sync: lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "--sync"])
     if bash: 
         print("Entering shell... 'exit 1' to abort the process.")
-        lower_exec(gentoo_dir, cache_dir, ["bash"])
+        lower_exec(gentoo_dir, cache_dir, portage_dir, ["bash"])
 
     done_file = os.path.join(gentoo_dir, ".done")
     done_file_time = os.stat(done_file).st_mtime if os.path.isfile(done_file) else None
 
-    portage_time = os.stat(os.path.join(repos_dir, "metadata/timestamp")).st_mtime
+    portage_time = os.stat(os.path.join(portage_dir, "metadata/timestamp")).st_mtime
     newest_file = max(newest_file, portage_time)
 
     if (not done_file_time or newest_file > done_file_time or sync or artifact == "none"):
-        lower_exec(gentoo_dir, cache_dir, ["emerge", "-uDN", "-bk", "--binpkg-respect-use=y", 
+        lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "-uDN", "-bk", "--binpkg-respect-use=y", 
             "system", "nano", "gentoolkit", "repoman", 
             "strace", "vim", "tcpdump", "netkit-telnetd"])
         if os.path.isfile(os.path.join(gentoo_dir, "build.sh")):
-            lower_exec(gentoo_dir, cache_dir, ["/build.sh"])
-        lower_exec(gentoo_dir, cache_dir, ["sh", "-c", "emerge -bk --binpkg-respect-use=y @preserved-rebuild && emerge --depclean && eselect python update && eselect python cleanup && etc-update --automode -5 && eclean-dist -d && eclean-pkg -d"])
+            lower_exec(gentoo_dir, cache_dir, portage_dir, ["/build.sh"])
+        lower_exec(gentoo_dir, cache_dir, portage_dir, ["sh", "-c", "emerge -bk --binpkg-respect-use=y @preserved-rebuild && emerge --depclean && eselect python update && eselect python cleanup && etc-update --automode -5 && eclean-dist -d && eclean-pkg -d"])
         with open(done_file, "w") as f:
             pass
     
     if artifact == "none": return None # no build artifact
     elif artifact == "bash": 
-        lower_exec(gentoo_dir, cache_dir, ["bash"])
+        lower_exec(gentoo_dir, cache_dir, portage_dir, ["bash"])
         return None
     #else
 
@@ -534,6 +562,8 @@ if __name__ == "__main__":
         artifacts += args.artifact
     
     if len(artifacts) == 0: artifacts.append("default")
+
+    extract_portage(args.base, args.workdir)
 
     for artifact in artifacts:
         if artifact != "default" and not os.path.isdir(os.path.join("./artifacts", artifact)):
