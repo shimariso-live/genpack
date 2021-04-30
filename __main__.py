@@ -102,12 +102,21 @@ def load_json_file(path):
     with open(path) as f:
         return json.load(f)
 
+def set_gitignore(workdir):
+    work_gitignore = os.path.join(workdir, ".gitignore")
+    if not os.path.exists(work_gitignore):
+        with open(work_gitignore, "w") as f:
+            f.write("/*")
+
 def extract_portage(base, workdir):
     portage_tarball_url = base + "snapshots/portage-latest.tar.xz"
     portage_tarball = os.path.join(workdir, "portage.tar.xz")
     portage_dir = os.path.join(workdir, "portage")
     trash_dir = os.path.join(workdir, "trash")
     done_file = os.path.join(portage_dir, ".done")
+
+    os.makedirs(workdir, exist_ok=True)
+    set_gitignore(workdir)
 
     if not os.path.isfile(portage_tarball) or os.path.getsize(portage_tarball) != get_content_length(portage_tarball_url):
         subprocess.check_call(["wget", "-O", portage_tarball, portage_tarball_url])
@@ -133,13 +142,12 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
         if build_json and "profile" in build_json: profile = build_json["profile"]
 
     stage3_tarball_url = get_latest_stage3_tarball_url(base)
-    #portage_tarball_url = base + "snapshots/portage-latest.tar.xz"
 
     arch_workdir = os.path.join(workdir, arch)
     os.makedirs(arch_workdir, exist_ok=True)
+    set_gitignore(workdir)
 
     stage3_tarball = os.path.join(arch_workdir, "stage3.tar.xz")
-    #portage_tarball = os.path.join(workdir, "portage.tar.xz")
     portage_dir = os.path.join(workdir, "portage")
 
     profile_workdir = os.path.join(arch_workdir, "profiles", profile)
@@ -154,9 +162,6 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     if not os.path.isfile(stage3_tarball) or os.path.getsize(stage3_tarball) != get_content_length(stage3_tarball_url):
         subprocess.check_call(["wget", "-O", stage3_tarball, stage3_tarball_url])
     
-    #if not os.path.isfile(portage_tarball) or os.path.getsize(portage_tarball) != get_content_length(portage_tarball_url):
-    #    subprocess.check_call(["wget", "-O", portage_tarball, portage_tarball_url])
-
     stage3_done_file = os.path.join(gentoo_dir, ".stage3-done")
     stage3_done_file_time = os.stat(stage3_done_file).st_mtime if os.path.isfile(stage3_done_file) else None
     if not stage3_done_file_time or stage3_done_file_time < os.stat(stage3_tarball).st_mtime:
@@ -166,8 +171,6 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
         os.makedirs(repos_dir, exist_ok=True)
         print("Extracting stage3...")
         subprocess.check_call(sudo(["tar", "xpf", stage3_tarball, "--strip-components=1", "-C", gentoo_dir]))
-        #print("Extracting portage...")
-        #subprocess.check_call(sudo(["tar", "xpf", portage_tarball, "--strip-components=1", "-C", repos_dir]))
         kernel_config_dir = os.path.join(gentoo_dir, "etc/kernels")
         subprocess.check_call(sudo(["mkdir", "-p", kernel_config_dir]))
         subprocess.check_call(sudo(["chmod", "-R", "o+rw", 
