@@ -55,7 +55,7 @@ def run(rootfs_file, disk_image, drm=False):
     
     qemu_cmdline = ["qemu-system-x86_64", "-enable-kvm", "-M", "q35", "-drive", "file=%s,format=raw,index=0,media=disk,if=virtio" % disk_image,
         "-rtc", "base=utc,clock=rt", "-m", "4096", "-no-shutdown"]
-    if drm: qemu_cmdline += ["-display", "gtk,gl=on", "-vga", "virtio", "-device", "virtio-mouse", "-device", "virtio-keyboard"]
+    if drm: qemu_cmdline += ["-display", "gtk,gl=on", "-vga", "virtio", "-usb", "-device", "usb-tablet", "-device", "virtio-keyboard"]
     subprocess.check_call(qemu_cmdline)
 
 if __name__ == "__main__":
