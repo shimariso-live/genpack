@@ -431,24 +431,19 @@ def scan_pkg_dep(gentoo_dir, pkg_map, pkgnames, pkgs = None):
         if pkgname not in pkg_map:
             if optional: continue
             else: raise BaseException("Package %s not found" % pkgname)
-        if len(pkg_map[pkgname]) == 1:
-            cat_pn = pkg_map[pkgname][0]
-        else:
-            pkg_candidates = list(filter(lambda x: not(x.startswith("acct-user/") or x.startswith("acct-group/") or x.startswith("virtual/")), pkg_map[pkgname]))
-            if len(pkg_candidates) == 1: cat_pn = pkg_candidates[0]
-            else: raise BaseException("Package %s is ambigious" % pkgname)
+        #else
+        for cat_pn in pkg_map[pkgname]:
+            cat_pn_wo_ver = strip_ver(cat_pn)
+            if cat_pn in pkgs: continue # already exists
 
-        cat_pn_wo_ver = strip_ver(cat_pn)
-        if cat_pn in pkgs: continue # already exists
-
-        pkgs.add(cat_pn) # add self
-        rdepend_file = os.path.join(gentoo_dir, "var/db/pkg", cat_pn, "RDEPEND")
-        if os.path.isfile(rdepend_file):
-            with open(rdepend_file) as f:
-                line = f.read().strip()
-                if len(line) > 0:
-                    rdepend_pkgnames = parse_rdepend_line(line)
-                    if len(rdepend_pkgnames) > 0: scan_pkg_dep(gentoo_dir, pkg_map, rdepend_pkgnames, pkgs)
+            pkgs.add(cat_pn) # add self
+            rdepend_file = os.path.join(gentoo_dir, "var/db/pkg", cat_pn, "RDEPEND")
+            if os.path.isfile(rdepend_file):
+                with open(rdepend_file) as f:
+                    line = f.read().strip()
+                    if len(line) > 0:
+                        rdepend_pkgnames = parse_rdepend_line(line)
+                        if len(rdepend_pkgnames) > 0: scan_pkg_dep(gentoo_dir, pkg_map, rdepend_pkgnames, pkgs)
 
     return pkgs
 
@@ -497,7 +492,8 @@ def copy(gentoo_dir, upper_dir, files):
         if os.path.islink(src_path):
             link = os.readlink(src_path)
             target = link[1:] if link[0] == '/' else os.path.join(os.path.dirname(f_wo_leading_slash), link)
-            rsync.stdin.write(encode_utf8(target + '\n'))
+            if os.path.exists(os.path.join(gentoo_dir, target)):
+                rsync.stdin.write(encode_utf8(target + '\n'))
     rsync.stdin.close()
     if rsync.wait() != 0: raise BaseException("rsync returned error code.")
 
