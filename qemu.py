@@ -37,10 +37,16 @@ else
 fi
 """
 
-def run(rootfs_file, disk_image, drm=False):
+def run(rootfs_file, disk_image, drm=False, data_volume=False, system_ini=None):
     with open(disk_image, "w") as f:
-        f.truncate(4 * 1024 * 1024 * 1024)
-    subprocess.check_call(["parted", "--script", disk_image, "mklabel msdos", "mkpart primary 1MiB -1", "set 1 boot on", "set 1 esp on"])
+        f.truncate(8 * 1024 * 1024 * 1024 if data_volume else 4 * 1024 * 1024 * 1024)
+    parted_commands = ["mklabel msdos"]
+    if data_volume:
+        parted_commands += ["mkpart primary 1MiB 4GiB", "mkpart primary 4GiB -1"]
+    else:
+        parted_commands += ["mkpart primary 1MiB -1"]
+    parted_commands += ["set 1 boot on", "set 1 esp on"]
+    subprocess.check_call(["parted", "--script", disk_image] + parted_commands)
     print("Run " + rootfs_file + " by qemu")
     with Loopback(disk_image) as loop:
         subprocess.check_call(sudo(["mkfs.vfat", "-F", "32", "%sp1" % loop]))
@@ -52,6 +58,9 @@ def run(rootfs_file, disk_image, drm=False):
             subprocess.check_call(sudo(["grub-install", "--target=i386-pc", "--skip-fs-probe", "--boot-directory=%s" % os.path.join(mountpoint, "boot"), 
                 "--modules=normal echo linux probe sleep test ls cat configfile cpuid minicmd vbe gfxterm_background png multiboot multiboot2 lvm xfs btrfs keystatus", loop]))
             subprocess.check_call(sudo(["cp", rootfs_file, os.path.join(mountpoint, "system.img")]))
+            if system_ini: subprocess.check_call(sudo(["cp", system_ini, os.path.join(mountpoint, "system.ini")]))
+        uuid = subprocess.check_output(["blkid", "-o", "value", "-s", "UUID", "%sp1" % loop]).decode("utf-8").strip()
+        subprocess.check_call(sudo(["mkfs.btrfs", "-L", "data-%s" % uuid, "%sp2" % loop]))
     
     qemu_cmdline = ["qemu-system-x86_64", "-enable-kvm", "-M", "q35", "-drive", "file=%s,format=raw,index=0,media=disk,if=virtio" % disk_image,
         "-rtc", "base=utc,clock=rt", "-m", "4096", "-no-shutdown"]

@@ -6,7 +6,7 @@ import os,re,argparse,subprocess,glob,json,uuid
 import importlib.resources
 import urllib.request
 
-import initlib,util
+import initlib,init,util
 import qemu
 from sudo import sudo,Tee
 
@@ -192,6 +192,8 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     put_resource_file(gentoo_dir, initlib, "initlib.h")
     put_resource_file(gentoo_dir, initlib, "fat.cpp")
     put_resource_file(gentoo_dir, initlib, "fat.h")
+    put_resource_file(gentoo_dir, init, "init.cpp")
+    put_resource_file(gentoo_dir, init, "init.h")
     put_resource_file(gentoo_dir, util, "build-kernel.py", "usr/local/sbin/build-kernel", True)
     put_resource_file(gentoo_dir, util, "with-mysql.py", "usr/local/sbin/with-mysql", True)
     put_resource_file(gentoo_dir, util, "download.py", "usr/local/bin/download", True)
@@ -254,7 +256,7 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
 
 def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_json):
     artifact_pkgs = ["gentoo-systemd-integration", "util-linux","timezone-data","bash","openssh", "coreutils", "procps", "net-tools", 
-        "iproute2", "iputils", "dbus", "python", "rsync", "tcpdump", "ca-certificates"]
+        "iproute2", "iputils", "dbus", "python", "rsync", "tcpdump", "ca-certificates","e2fsprogs"]
     if build_json and "packages" in build_json:
         if not isinstance(build_json["packages"], list): raise Exception("packages must be list")
         #else
@@ -550,6 +552,8 @@ if __name__ == "__main__":
     parser.add_argument("--bash", action="store_true", default=False, help="Enter bash before anything")
     parser.add_argument("--qemu", action="store_true", default=False, help="Run generated rootfs using qemu")
     parser.add_argument("--drm", action="store_true", default=False, help="Enable DRM(virgl) when running qemu")
+    parser.add_argument("--data-volume", action="store_true", default=False, help="Create data partition when running qemu")
+    parser.add_argument("--system-ini", default=None, help="system.ini file when running qemu")
     parser.add_argument("--profile", default=None, help="Override profile")
     parser.add_argument("artifact", default=[], nargs='*', help="Artifacts to build")
     args = parser.parse_args()
@@ -574,7 +578,7 @@ if __name__ == "__main__":
         else:
             outfile = main(args.base, args.workdir, arch, args.sync, args.bash, artifact, args.outfile, args.profile)
             if outfile is not None and args.qemu:
-                qemu.run(outfile, os.path.join(args.workdir, "qemu.img"), args.drm)
+                qemu.run(outfile, os.path.join(args.workdir, "qemu.img"), args.drm, args.data_volume, args.system_ini)
         print("Done.")
     
     trash_dir = os.path.join(args.workdir, "trash")

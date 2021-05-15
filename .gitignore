@@ -5,3 +5,4 @@ genpack
 *.squashfs
 *.o
 *.a
+*.bin
