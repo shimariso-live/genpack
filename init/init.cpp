@@ -837,7 +837,7 @@ static std::filesystem::path do_init()
 
   // compatibility
   if (boot_partition_dev_path == "/dev/vda1" && init::lib::is_block("/dev/vda2") && init::lib::mount("/dev/vda2", mnt_rw, "xfs") == 0) {
-    std::cout << " Using /dev/vda2 as RW later." << std::endl;
+    std::cout << " Using /dev/vda2 as RW layer." << std::endl;
   }
 
   auto data_partition = (!init::lib::is_mounted(mnt_rw) && boot_partition_uuid)? get_data_partition(boot_partition_uuid.value()) : std::nullopt;
