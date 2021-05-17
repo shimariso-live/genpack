@@ -833,10 +833,8 @@ static std::filesystem::path do_init()
         std::cout << "Failed to mount RW layer." << std::endl;
       }
     }
-  }
-
-  // compatibility
-  if (boot_partition_dev_path == "/dev/vda1" && init::lib::is_block("/dev/vda2") && init::lib::mount("/dev/vda2", mnt_rw, "xfs") == 0) {
+  } else if (boot_partition_dev_path == "/dev/vda1" && init::lib::is_block("/dev/vda2") && init::lib::mount("/dev/vda2", mnt_rw, "xfs") == 0) {
+    // compatibility
     std::cout << " Using /dev/vda2 as RW layer." << std::endl;
   }
 
@@ -1015,7 +1013,7 @@ static void shutdown(const std::optional<std::string>& arg)
 
 static const char* SWITCH_ROOT = "/sbin/switch_root";
 
-static void print_files(const std::filesystem::path& me)
+static int print_files(const std::filesystem::path& me)
 {
   std::set<std::filesystem::path> files;
 
@@ -1038,18 +1036,27 @@ static void print_files(const std::filesystem::path& me)
     }
   });
 
-  // for fsck.fat
-  if (init::lib::is_dir("/usr/lib64/gconv") && init::lib::is_file("/usr/lib64/gconv/gconv-modules.cache")) {
-    insert_file("/usr/lib64/gconv/gconv-modules.cache");
-    insert_file("/usr/lib64/gconv/IBM850.so");
-  } else if (init::lib::is_dir("/usr/lib/gconv") && init::lib::is_file("/usr/lib/gconv/gconv-modules.cache")) {
-    insert_file("/usr/lib/gconv/gconv-modules.cache");
-    insert_file("/usr/lib/gconv/IBM850.so");
+  if (files.find("/usr/sbin/fsck.fat") != files.end()) {
+    // fsck.fat needs some codepage modules
+    if (init::lib::is_dir("/usr/lib64/gconv") && init::lib::is_file("/usr/lib64/gconv/gconv-modules.cache")) {
+      insert_file("/usr/lib64/gconv/gconv-modules.cache");
+      insert_file("/usr/lib64/gconv/IBM850.so");
+    } else if (init::lib::is_dir("/usr/lib/gconv") && init::lib::is_file("/usr/lib/gconv/gconv-modules.cache")) {
+      insert_file("/usr/lib/gconv/gconv-modules.cache");
+      insert_file("/usr/lib/gconv/IBM850.so");
+    }
   }
 
+  int rst = 0;
   for (auto file:files) {
     std::cout << file.string().substr(1) << std::endl;
+    if (!std::filesystem::exists(file)) {
+      std::cerr << file << " does not exist." << std::endl;
+      rst = 1;
+    }
   }
+
+  return rst;
 }
 
 int main(int argc, char* argv[])
@@ -1079,7 +1086,5 @@ int main(int argc, char* argv[])
   }
   //else
 
-  print_files(progname);
-
-  return 0;
+  return print_files(progname);
 }
