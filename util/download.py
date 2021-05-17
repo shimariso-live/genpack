@@ -8,7 +8,7 @@ def main(cachedir, url):
     obj_path = os.path.join(cachedir, url_hash)
 
     os.makedirs(cachedir, exist_ok=True)
-    cmdline = ["curl", "-o", obj_path]
+    cmdline = ["curl", "-L", "-o", obj_path]
     if os.path.exists(obj_path): cmdline += ["-z", obj_path]
     cmdline.append(url)
     subprocess.check_call(cmdline, stdout=subprocess.DEVNULL)
