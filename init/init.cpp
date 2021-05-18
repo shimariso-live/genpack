@@ -856,7 +856,7 @@ static std::filesystem::path do_init(bool transient)
       auto data_partition_fstype = std::get<2>(data_partition.value());
       if (data_partition_fstype == "btrfs" && init::lib::mount(data_partition_dev_path, mnt_data, "btrfs") == 0) {
         std::cout << "Data partition " << data_partition_dev_path << " found." << std::endl;
-        for (auto name:{"rw","vm","docker","swap"}) {
+        for (auto name:{"rw","docker","swap"}) {
           if (!std::filesystem::exists(mnt_data / name)) {
             if (!create_btrfs_subvolume(mnt_data / name)) {
               std::cout << "Failed to create subvolume " << name << " under data partition." << std::endl;
@@ -961,11 +961,6 @@ static std::filesystem::path do_init(bool transient)
   if (data_partition) {
     auto data_partition_dev_path = std::get<0>(data_partition.value());
 
-    const auto vm_default = newroot / "var/vm/@default";
-    if (init::lib::is_dir(vm_default) && init::lib::mount(data_partition_dev_path, vm_default, "btrfs", MS_RELATIME, "subvol=vm") != 0) {
-      std::cout << "Default VM subvolume couldn't be mounted." << std::endl;
-    }
-
     const auto docker = newroot / "var/lib/docker";
     if (init::lib::is_dir(docker) && init::lib::mount(data_partition_dev_path, docker, "btrfs", MS_RELATIME, "subvol=docker") != 0) {
       std::cout << "Docker subvolume couldn't be mounted." << std::endl;
@@ -999,7 +994,12 @@ static void shutdown(const std::optional<std::string>& arg)
     if (init::lib::umount_recursive(mnt_initramfs / "swap") != 0) std::cout << "Unmount failed: swap";
   }
   auto mnt_initramfs_boot = mnt_initramfs / "boot";
-  unlink(mnt_initramfs_boot / init::TIME_FILE);
+  auto time_file = mnt_initramfs_boot / init::TIME_FILE;
+  if (init::lib::is_file(time_file)) {
+    if (init::lib::mount("none", mnt_initramfs_boot, "auto", MS_RELATIME, "remount,rw") == 0) {
+      unlink(time_file);
+    }
+  }
   auto boot_partition_dev_path = init::lib::get_source_device_from_mountpoint(mnt_initramfs_boot);
   if (init::lib::umount_recursive(mnt) != 0) std::cout << "Unmount failed: run" << std::endl;
   std::cout << "done." << std::endl;
