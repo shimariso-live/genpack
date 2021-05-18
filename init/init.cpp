@@ -877,7 +877,7 @@ static std::filesystem::path do_init(bool transient)
       std::filesystem::create_directory(mnt_swap);
       if (init::lib::mount(data_partition_dev_path, mnt_swap, "btrfs", MS_RELATIME, "subvol=swap") == 0) {
         auto swapfile = mnt_swap / "swapfile";
-        if (init::lib::exec(init::progs::SWAPON, {swapfile.string()}) == 0) {
+        if (init::lib::is_file(swapfile) && init::lib::exec(init::progs::SWAPON, {swapfile.string()}) == 0) {
           std::cout << "Reusable swapfile found and enabled." << std::endl;
         } else {
           auto free_disk_space = init::lib::get_free_disk_space(mnt_swap);

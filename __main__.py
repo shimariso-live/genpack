@@ -202,6 +202,7 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     put_resource_file(gentoo_dir, util, "do-with-lvm-snapshot", "usr/sbin/do-with-lvm-snapshot", True)
     put_resource_file(gentoo_dir, util, "rpmbootstrap.py", "usr/sbin/rpmbootstrap", True)
     put_resource_file(gentoo_dir, util, "genbootstrap.py", "usr/sbin/genbootstrap", True)
+    put_resource_file(gentoo_dir, util, "genpack-install.cpp", "usr/src/genpack-install.cpp", True)
 
     if sync: lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "--sync"])
     if bash: 
