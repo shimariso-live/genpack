@@ -541,7 +541,7 @@ __attribute__((weak)) void init::hooks::setup_hostname(const std::filesystem::pa
   }
 }
 
-static std::filesystem::path do_init()
+static std::filesystem::path do_init(bool transient)
 {
   init::hooks::print_banner();
 
@@ -577,30 +577,37 @@ static std::filesystem::path do_init()
   auto mnt_rw = mnt / "rw";
   std::filesystem::create_directory(mnt_rw);
 
-  if (readonly_boot_partition) {
-    if (init::lib::mount("/dev/xvda2", mnt_rw) != 0) RUNTIME_ERROR("mount /mnt/rw");
-  } else {
-    if (init::lib::bind_mount(mnt_boot, mnt_rw) != 0) RUNTIME_ERROR("mount --bind /mnt/boot /mnt/rw");
-  }
-  std::cout << "RW Layer mounted." << std::endl;
+  if (!transient) {
+    if (readonly_boot_partition) {
+      if (init::lib::mount("/dev/xvda2", mnt_rw) != 0) RUNTIME_ERROR("mount /mnt/rw");
+    } else {
+      if (init::lib::bind_mount(mnt_boot, mnt_rw) != 0) RUNTIME_ERROR("mount --bind /mnt/boot /mnt/rw");
+    }
+    std::cout << "RW Layer mounted." << std::endl;
 
-  // activate swap
-  if (readonly_boot_partition && init::lib::is_block("/dev/xvda3")) {
-    init::lib::exec(init::progs::SWAPON, {"/dev/xvda3"});
-    std::cout << "Swap partition enabled." << std::endl;
-  } else {
-    auto swapfile = mnt_boot / "swapfile";
-    if (init::lib::is_file(swapfile)) {
-      if (init::lib::exec(init::progs::SWAPON, {swapfile.string()}) == 0) {
-        std::cout << "Swap file enabled." << std::endl;
-      } else {
-        if (init::lib::exec(init::progs::MKSWAP, {swapfile.string()}) == 0) {
-          if (init::lib::exec(init::progs::SWAPON, {swapfile.string()}) == 0) {
-            std::cout << "Swap file initialized and activated." << std::endl;
+    // activate swap
+    if (readonly_boot_partition && init::lib::is_block("/dev/xvda3")) {
+      init::lib::exec(init::progs::SWAPON, {"/dev/xvda3"});
+      std::cout << "Swap partition enabled." << std::endl;
+    } else {
+      auto swapfile = mnt_boot / "swapfile";
+      if (init::lib::is_file(swapfile)) {
+        if (init::lib::exec(init::progs::SWAPON, {swapfile.string()}) == 0) {
+          std::cout << "Swap file enabled." << std::endl;
+        } else {
+          if (init::lib::exec(init::progs::MKSWAP, {swapfile.string()}) == 0) {
+            if (init::lib::exec(init::progs::SWAPON, {swapfile.string()}) == 0) {
+              std::cout << "Swap file initialized and activated." << std::endl;
+            }
           }
         }
       }
     }
+  } // !transient
+
+  if (!init::lib::is_mounted(mnt_rw)) {
+    std::cout << "Using tmpfs as upper layer..." << std::endl;
+    if (init::lib::mount("tmpfs", mnt_rw, "tmpfs") != 0) RUNTIME_ERROR("mount rw");
   }
 
   auto newroot = setup_newroot(mnt_system, mnt_boot, mnt_rw);
@@ -776,7 +783,7 @@ static std::optional<std::tuple<std::filesystem::path,std::optional<std::string/
   return std::nullopt;
 }
 
-static std::filesystem::path do_init()
+static std::filesystem::path do_init(bool transient)
 {
   init::hooks::print_banner();
 
@@ -823,92 +830,93 @@ static std::filesystem::path do_init()
   auto mnt_rw = mnt / "rw";
   std::filesystem::create_directory(mnt_rw);
 
-  auto datafile = mnt_boot / "system.dat";
-  if (init::lib::is_file(datafile)) {
-    std::cout << "Using system.dat as RW layer." << std::endl;
-    if (init::lib::mount_loop(datafile, mnt_rw, "btrfs", MS_RELATIME, "compress=zstd") != 0) {
-      std::cout << "Failed to mount RW layer. Attempting repair." << std::endl;
-      init::lib::exec(init::progs::BTRFS, {"check", "--repair", "--force", datafile.string()});
-      if (init::lib::mount_loop(datafile, mnt_rw, "btrfs", MS_RELATIME, "compress=zstd") != 0) {
-        std::cout << "Failed to mount RW layer." << std::endl;
-      }
-    }
-  } else if (boot_partition_dev_path == "/dev/vda1" && init::lib::is_block("/dev/vda2") && init::lib::mount("/dev/vda2", mnt_rw, "xfs") == 0) {
-    // compatibility
-    std::cout << " Using /dev/vda2 as RW layer." << std::endl;
-  }
-
-  auto data_partition = (!init::lib::is_mounted(mnt_rw) && boot_partition_uuid)? get_data_partition(boot_partition_uuid.value()) : std::nullopt;
-
   auto mnt_swap = mnt / "swap";
+  auto data_partition = boot_partition_uuid? get_data_partition(boot_partition_uuid.value()) : std::nullopt;
 
-  if (data_partition) {
-    auto mnt_data = mnt / "data";
-    std::filesystem::create_directory(mnt_data);
-    auto data_partition_dev_path = std::get<0>(data_partition.value());
-    auto data_partition_fstype = std::get<2>(data_partition.value());
-    if (data_partition_fstype == "btrfs" && init::lib::mount(data_partition_dev_path, mnt_data, "btrfs") == 0) {
-      std::cout << "Data partition " << data_partition_dev_path << " found." << std::endl;
-      for (auto name:{"rw","vm","docker","swap"}) {
-        if (!std::filesystem::exists(mnt_data / name)) {
-          if (!create_btrfs_subvolume(mnt_data / name)) {
-            std::cout << "Failed to create subvolume " << name << " under data partition." << std::endl;
-          }
+  if (!transient) {
+    auto datafile = mnt_boot / "system.dat";
+    if (init::lib::is_file(datafile)) {
+      std::cout << "Using system.dat as RW layer." << std::endl;
+      if (init::lib::mount_loop(datafile, mnt_rw, "btrfs", MS_RELATIME, "compress=zstd") != 0) {
+        std::cout << "Failed to mount RW layer. Attempting repair." << std::endl;
+        init::lib::exec(init::progs::BTRFS, {"check", "--repair", "--force", datafile.string()});
+        if (init::lib::mount_loop(datafile, mnt_rw, "btrfs", MS_RELATIME, "compress=zstd") != 0) {
+          std::cout << "Failed to mount RW layer." << std::endl;
         }
       }
-      init::hooks::setup_data_subvolumes(mnt_data);
-      umount(mnt_data.c_str());
-    } else {
-      std::cout << "Failed to mount data partition" << std::endl;
+    } else if (boot_partition_dev_path == "/dev/vda1" && init::lib::is_block("/dev/vda2") && init::lib::mount("/dev/vda2", mnt_rw, "xfs") == 0) {
+      // compatibility
+      std::cout << " Using /dev/vda2 as RW layer." << std::endl;
     }
 
-    if (!init::lib::is_mounted(mnt_rw)) {
-      if (init::lib::mount(data_partition_dev_path, mnt_rw, "btrfs", MS_RELATIME, "subvol=rw") != 0) {
-        std::cout << "Mounting RW layer on btrfs subvolume failed." << std::endl;
-      }
-    }
-    std::filesystem::create_directory(mnt_swap);
-    if (init::lib::mount(data_partition_dev_path, mnt_swap, "btrfs", MS_RELATIME, "subvol=swap") == 0) {
-      auto swapfile = mnt_swap / "swapfile";
-      if (init::lib::exec(init::progs::SWAPON, {swapfile.string()}) == 0) {
-        std::cout << "Reusable swapfile found and enabled." << std::endl;
+    if (data_partition) {
+      auto mnt_data = mnt / "data";
+      std::filesystem::create_directory(mnt_data);
+      auto data_partition_dev_path = std::get<0>(data_partition.value());
+      auto data_partition_fstype = std::get<2>(data_partition.value());
+      if (data_partition_fstype == "btrfs" && init::lib::mount(data_partition_dev_path, mnt_data, "btrfs") == 0) {
+        std::cout << "Data partition " << data_partition_dev_path << " found." << std::endl;
+        for (auto name:{"rw","vm","docker","swap"}) {
+          if (!std::filesystem::exists(mnt_data / name)) {
+            if (!create_btrfs_subvolume(mnt_data / name)) {
+              std::cout << "Failed to create subvolume " << name << " under data partition." << std::endl;
+            }
+          }
+        }
+        init::hooks::setup_data_subvolumes(mnt_data);
+        umount(mnt_data.c_str());
       } else {
-        auto free_disk_space = init::lib::get_free_disk_space(mnt_swap);
-        if (free_disk_space >= 2L * 1024 * 1024 * 1024) {
-          uint64_t swap_size = 4L * 1024 * 1024 * 1024;
-          while (swap_size * 2 > free_disk_space) { swap_size /= 2;}          
-          std::cout << "Creating swapfile..." << std::flush;
-          int fd = creat(swapfile.c_str(), S_IRUSR | S_IWUSR);
-          if (fd >= 0) {
-            init::lib::exec(init::progs::CHATTR, {"+C", swapfile.string()});
-            int rst = fallocate(fd, 0, 0, swap_size);
-            close(fd);
-            if (rst == 0) {
-              if (init::lib::exec(init::progs::MKSWAP, {swapfile.string()}) == 0) {
-                if (init::lib::exec(init::progs::SWAPON, {swapfile.string()}) == 0) {
-                  std::cout << "done." << std::endl;
+        std::cout << "Failed to mount data partition" << std::endl;
+      }
+
+      if (!init::lib::is_mounted(mnt_rw)) {
+        if (init::lib::mount(data_partition_dev_path, mnt_rw, "btrfs", MS_RELATIME, "subvol=rw") != 0) {
+          std::cout << "Mounting RW layer on btrfs subvolume failed." << std::endl;
+        }
+      }
+      std::filesystem::create_directory(mnt_swap);
+      if (init::lib::mount(data_partition_dev_path, mnt_swap, "btrfs", MS_RELATIME, "subvol=swap") == 0) {
+        auto swapfile = mnt_swap / "swapfile";
+        if (init::lib::exec(init::progs::SWAPON, {swapfile.string()}) == 0) {
+          std::cout << "Reusable swapfile found and enabled." << std::endl;
+        } else {
+          auto free_disk_space = init::lib::get_free_disk_space(mnt_swap);
+          if (free_disk_space >= 2L * 1024 * 1024 * 1024) {
+            uint64_t swap_size = 4L * 1024 * 1024 * 1024;
+            while (swap_size * 2 > free_disk_space) { swap_size /= 2;}          
+            std::cout << "Creating swapfile..." << std::flush;
+            int fd = creat(swapfile.c_str(), S_IRUSR | S_IWUSR);
+            if (fd >= 0) {
+              init::lib::exec(init::progs::CHATTR, {"+C", swapfile.string()});
+              int rst = fallocate(fd, 0, 0, swap_size);
+              close(fd);
+              if (rst == 0) {
+                if (init::lib::exec(init::progs::MKSWAP, {swapfile.string()}) == 0) {
+                  if (init::lib::exec(init::progs::SWAPON, {swapfile.string()}) == 0) {
+                    std::cout << "done." << std::endl;
+                  } else {
+                    std::cout << "done but not enabled as swapon fail" << std::endl;
+                  }
                 } else {
-                  std::cout << "done but not enabled as swapon fail" << std::endl;
+                  std::cout << "failed(mkswap)." << std::endl;
                 }
               } else {
-                std::cout << "failed(mkswap)." << std::endl;
+                std::cout << "failed(ftruncate)." << std::endl;
               }
             } else {
-              std::cout << "failed(ftruncate)." << std::endl;
+              std::cout << "failed(creat)." << std::endl;
             }
           } else {
-            std::cout << "failed(creat)." << std::endl;
+            std::cout << "Swapfile not created due to insufficient disk space." << std::endl;
           }
-        } else {
-          std::cout << "Swapfile not created due to insufficient disk space." << std::endl;
         }
+      } else {
+        std::cout << "Swap subvolume not mounted." << std::endl;
       }
-    } else {
-      std::cout << "Swap subvolume not mounted." << std::endl;
+    } else {// data_partition
+      std::cout << "No data partition found. Proceeding without it." << std::endl;
     }
-  } else {// data_partition
-    std::cout << "No data partition found. Proceeding without it." << std::endl;
-  }
+  } // !transient
 
   if (!init::lib::is_mounted(mnt_rw)) {
     std::cout << "Using tmpfs as upper layer..." << std::endl;
@@ -917,7 +925,8 @@ static std::filesystem::path do_init()
 
   std::cout << "RW Layer mounted." << std::endl;
 
-  auto newroot = setup_newroot(mnt_system, mnt_boot, mnt_rw, mnt_swap);
+  auto newroot = setup_newroot(mnt_system, mnt_boot, mnt_rw, 
+    init::lib::is_mounted(mnt_swap)? std::make_optional(mnt_swap) : std::nullopt);
 
   try {
     init::hooks::setup_hostname(newroot, inifile.get());
@@ -1017,13 +1026,18 @@ static int print_files(const std::filesystem::path& me)
 {
   std::set<std::filesystem::path> files;
 
-  auto insert_file = [&files](const std::string& line) {
-    for (auto path = std::filesystem::path(line); path != "/" && path != ""; path = path.parent_path()) {
-      files.insert(path);
+  auto canonical_me = std::filesystem::canonical(me);
+  auto insert_file = [&files,&canonical_me](const std::string& line) {
+    if (canonical_me == line) {
+      files.insert(line);
+    } else {
+      for (auto path = std::filesystem::path(line); path != "/" && path != ""; path = path.parent_path()) {
+        files.insert(path);
+      }
     }
   };
 
-  std::vector<std::string> args = {"-l", std::filesystem::canonical(me)};
+  std::vector<std::string> args = {"-l", canonical_me};
   for (auto prog:init::progs::ALL) {
     args.push_back(prog);
   }
@@ -1047,27 +1061,59 @@ static int print_files(const std::filesystem::path& me)
     }
   }
 
-  int rst = 0;
+  char tempdir_rp[] = "/tmp/genpack-initramfs-XXXXXX";
+  auto tempdir = std::shared_ptr<char>(mkdtemp(tempdir_rp), [](char* p) { 
+    std::filesystem::remove_all(p);
+  });
+  if (!tempdir) {
+    std::cerr << "Failed to create temporary directory." << std::endl;
+    return 1;
+  }
+  std::filesystem::path tempdir_path(tempdir.get());
+
   for (auto file:files) {
-    std::cout << file.string().substr(1) << std::endl;
     if (!std::filesystem::exists(file)) {
-      std::cerr << file << " does not exist." << std::endl;
-      rst = 1;
+      std::cerr << "File " << file << " does not exist." << std::endl;
+      return 1;
+    }
+    //else
+    auto dst = tempdir_path / file.string().substr(1);
+    if (std::filesystem::is_directory(file)) {
+      std::filesystem::create_directory(dst);
+    } else if (std::filesystem::is_regular_file(file)) {
+      std::filesystem::copy_file(file, file == canonical_me? (tempdir_path / "init") : dst);
+    } else {
+      std::cerr << "Unknown file type: " << file << std::endl;
+      return 1;
     }
   }
 
-  return rst;
+  if (std::filesystem::exists(tempdir_path / "init")) {
+    std::filesystem::create_symlink("init", tempdir_path / "init-transient");
+  }
+
+  std::filesystem::current_path(tempdir_path);
+  std::set<std::filesystem::path> files_to_archive;
+  for (const auto& path : std::filesystem::recursive_directory_iterator(".")) {
+    files_to_archive.insert(path);
+  }
+
+  return init::lib::exec("/bin/cpio", {"-H", "newc", "-o"}, "/", [&files_to_archive](std::ostream& o) {
+    for (const auto& file:files_to_archive) {
+      o << file.string() << std::endl;
+    }
+  });
 }
 
 int main(int argc, char* argv[])
 {
   std::filesystem::path progname(argv[0]);
-  if (progname == "/init" && getpid() == 1) {
+  if ((progname == "/init" || progname == "/init-transient") && getpid() == 1) {
     try {
       setup_proc_dev_sys();
-      auto newroot = do_init();
+      auto newroot = do_init(progname == "/init-transient");
       std::cout << "Switching to newroot..." << std::endl;
-      if (execl(SWITCH_ROOT, SWITCH_ROOT, newroot.c_str(), "/sbin/init", NULL) != 0)
+      if (execl(SWITCH_ROOT, SWITCH_ROOT, newroot.c_str(), "/sbin/init"/*TODO: respect init= kernel param*/, NULL) != 0)
         RUNTIME_ERROR("switch_root");
     }
     catch (const std::exception& e) {
