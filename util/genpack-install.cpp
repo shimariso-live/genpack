@@ -305,7 +305,7 @@ int print_installable_disks()
             disks_to_be_excluded.insert(d.name);
             if (d.pkname) disks_to_be_excluded.insert(d.pkname.value());
         }
-        if (d.ro || d.size < MIN_DISK_SIZE || d.type != "disk") {
+        if (d.ro || d.size < MIN_DISK_SIZE || (d.type != "disk" && d.type != "loop")) {
             disks_to_be_excluded.insert(d.name);
         }
     }
@@ -435,7 +435,7 @@ void copy_system_cfg_ini(const std::optional<std::filesystem::path>& system_cfg,
 
 int install_to_disk(const std::filesystem::path& disk, const std::optional<std::filesystem::path>& _system_image, bool data_partition = true, 
     const std::optional<std::filesystem::path>& system_cfg = std::nullopt, const std::optional<std::filesystem::path>& system_ini = std::nullopt,
-    const std::optional<std::string>& label = std::nullopt)
+    const std::optional<std::string>& label = std::nullopt, bool yes = false)
 {
     if (disk == "list") return print_installable_disks();
 
@@ -448,7 +448,6 @@ int install_to_disk(const std::filesystem::path& disk, const std::optional<std::
     if (!std::filesystem::exists(system_image)) throw std::runtime_error("System image file " + system_image.string() + " does not exist.");
 
     if (!std::filesystem::exists(disk)) throw std::runtime_error("No such device");
-    if (!std::filesystem::is_block_file(disk)) throw std::runtime_error(disk.string() + " is not a block device");
 
     auto lsblk_result = lsblk(disk);
     if (lsblk_result.size() == 0) throw std::runtime_error("No such device");
@@ -460,7 +459,7 @@ int install_to_disk(const std::filesystem::path& disk, const std::optional<std::
 
     auto disk_info = *lsblk_result.begin();
 
-    if (disk_info.type != "disk") throw std::runtime_error(disk.string() + " is not a disk");
+    if (disk_info.type != "disk" && disk_info.type != "loop") throw std::runtime_error(disk.string() + " is not a disk");
     if (disk_info.ro) throw std::runtime_error(disk.string() + " is read-only device");
     if (has_mounted_partition) throw std::runtime_error(disk.string() + " has mounted partition");
     if (disk_info.pkname) throw std::runtime_error(disk.string() + " belongs to other block device");
@@ -476,10 +475,12 @@ int install_to_disk(const std::filesystem::path& disk, const std::optional<std::
     std::cout << "Disk size: " << size_str(disk_info.size) << std::endl;
     std::cout << "Logical sector size: " << disk_info.log_sec << " bytes" << std::endl;
 
-    std::string sure;
-    std::cout << "All data present on " << disk << " will be lost. Are you sure? (y/n):" << std::flush;
-    std::cin >> sure;
-    if (sure != "y" && sure != "yes" && sure != "Y") return 1;
+    if (!yes) {
+        std::string sure;
+        std::cout << "All data present on " << disk << " will be lost. Are you sure? (y/n):" << std::flush;
+        std::cin >> sure;
+        if (sure != "y" && sure != "yes" && sure != "Y") return 1;
+    }
 
     std::cout << "Checking system image file..." << std::endl;
     check_system_image(system_image);
@@ -533,9 +534,11 @@ int install_to_disk(const std::filesystem::path& disk, const std::optional<std::
                 << std::endl;
         }
         std::cout << "Done" << std::endl;
-        std::cout << "Copying system config file..." << std::flush;
-        copy_system_cfg_ini(system_cfg, system_ini, tempdir_path);
-        std::cout << "Done" << std::endl;
+        if (system_cfg || system_ini) {
+            std::cout << "Copying system config file..." << std::flush;
+            copy_system_cfg_ini(system_cfg, system_ini, tempdir_path);
+            std::cout << "Done" << std::endl;
+        }
         std::cout << "Copying system image file..." << std::flush;
         std::filesystem::copy_file(system_image, tempdir_path / "system.img");
     }
@@ -676,6 +679,7 @@ int usage(const std::string& progname)
     std::cout << "or" << std::endl;
     std::cout << ' ' << progname << ' ' << "--disk=<iso image file> --cdrom [--label=<label>] [system image file]" << std::endl;
     std::cout << "\noptions:" << std::endl;
+    std::cout << ' ' << "-y : Don't ask questions" << std::endl;
     std::cout << ' ' << "--label=<volume label> : Specify volume label of boot partition or iso9660 image" << std::endl;
     std::cout << ' ' << "--system-cfg=<system.cfg> : Install specified system.cfg file" << std::endl;
     std::cout << ' ' << "--system-ini=<system.ini> : Install specified system.ini file" << std::endl;
@@ -697,8 +701,9 @@ int main(int argc, char* argv[])
         {         0,                 0,     0,  0  }, // termination
     };
     int c;
-    const char* optstring = "d:c:i:h";
+    const char* optstring = "d:c:i:hy";
     int longindex = 0;
+    bool yes = false;
     std::optional<std::filesystem::path> disk, system_image, system_cfg, system_ini;
     std::optional<std::string> label;
 
@@ -713,6 +718,8 @@ int main(int argc, char* argv[])
             system_ini = optarg;
         } else if (c == 'l') {
             label = optarg;
+        } else if (c == 'y') {
+            yes = true;
         }
     }
 
@@ -731,7 +738,7 @@ int main(int argc, char* argv[])
     try {
         if (geteuid() != 0) throw std::runtime_error("You must be root");
         return disk? (cdrom? create_iso9660_image(disk.value(), system_image, system_cfg, system_ini, label) 
-            : install_to_disk(disk.value(), system_image, data_patririon == 1, system_cfg, system_ini, label)) 
+            : install_to_disk(disk.value(), system_image, data_patririon == 1, system_cfg, system_ini, label, yes)) 
                 : install_self(system_image.value(), system_cfg, system_ini);
     }
     catch (const std::exception& ex) {
