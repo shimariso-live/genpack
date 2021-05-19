@@ -1,4 +1,4 @@
-all: genpack
+all: genpack genpack-install
 
 genpack.zip: __main__.py qemu.py sudo.py \
 		initlib/__init__.py initlib/initlib.cpp initlib/initlib.h initlib/fat.cpp initlib/fat.h \
@@ -13,9 +13,13 @@ genpack: genpack.zip
 	echo '#!/usr/bin/env python' | cat - $^ > $@
 	chmod +x $@
 
+genpack-install: util/genpack-install.cpp
+	g++ -std=c++2a -o $@ $^ -lmount -lblkid
+
 install: all
 	cp -a genpack /usr/local/bin/
+	cp -a genpack-install /usr/local/sbin/
 
 clean:
-	rm -rf genpack.zip genpack __pycache__ *.squashfs
+	rm -rf genpack.zip genpack __pycache__ *.squashfs genpack-install
 
