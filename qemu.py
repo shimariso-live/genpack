@@ -60,7 +60,7 @@ def run(rootfs_file, disk_image, drm=False, data_volume=False, system_ini=None):
             subprocess.check_call(sudo(["cp", rootfs_file, os.path.join(mountpoint, "system.img")]))
             if system_ini: subprocess.check_call(sudo(["cp", system_ini, os.path.join(mountpoint, "system.ini")]))
         uuid = subprocess.check_output(["blkid", "-o", "value", "-s", "UUID", "%sp1" % loop]).decode("utf-8").strip()
-        subprocess.check_call(sudo(["mkfs.btrfs", "-L", "data-%s" % uuid, "%sp2" % loop]))
+        if data_volume: subprocess.check_call(sudo(["mkfs.btrfs", "-L", "data-%s" % uuid, "%sp2" % loop]))
     
     qemu_cmdline = ["qemu-system-x86_64", "-enable-kvm", "-M", "q35", "-drive", "file=%s,format=raw,index=0,media=disk,if=virtio" % disk_image,
         "-rtc", "base=utc,clock=rt", "-m", "4096", "-no-shutdown"]
