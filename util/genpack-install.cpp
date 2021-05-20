@@ -680,6 +680,7 @@ int usage(const std::string& progname)
     std::cout << ' ' << progname << ' ' << "--disk=<iso image file> --cdrom [--label=<label>] [system image file]" << std::endl;
     std::cout << "\noptions:" << std::endl;
     std::cout << ' ' << "-y : Don't ask questions" << std::endl;
+    std::cout << ' ' << "--no-data-partition : Use entire disk as boot partition" << std::endl;
     std::cout << ' ' << "--label=<volume label> : Specify volume label of boot partition or iso9660 image" << std::endl;
     std::cout << ' ' << "--system-cfg=<system.cfg> : Install specified system.cfg file" << std::endl;
     std::cout << ' ' << "--system-ini=<system.ini> : Install specified system.ini file" << std::endl;
