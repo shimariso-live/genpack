@@ -948,7 +948,7 @@ static std::filesystem::path do_init(bool transient)
     std::cout << "Exception occured during optional configuration. '" << ex.what() << "'." << std::endl;
   }
 
-  if (!init::lib::is_file(newroot / "run/initramfs/rw/root/etc/hostname")) {
+  if (!init::lib::is_file(newroot / "etc/hostname")) {
     // set generated hostname
     auto hostname = init::lib::set_hostname(newroot);
     if (hostname) {
