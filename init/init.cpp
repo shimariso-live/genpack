@@ -794,6 +794,30 @@ __attribute__((weak)) void init::hooks::setup_wifi(const std::filesystem::path& 
   }
 }
 
+__attribute__((weak)) void init::hooks::setup_autologin(const std::filesystem::path& newroot, inifile_t inifile)
+{
+  auto autologin = iniparser_getboolean(inifile, ":autologin", 0) != 0;
+  auto service_dir = newroot / "etc/systemd/system/getty@tty1.service.d";
+  auto conf_file = service_dir / "autologin-configured-by-initramfs.conf";
+  if (autologin) {
+    std::filesystem::create_directories(service_dir);
+    std::ofstream f(conf_file);
+    if (f) {
+      f << "[Service]" << std::endl;
+      f << "ExecStart=" << std::endl;
+      f << "ExecStart=-/sbin/agetty --autologin root --noclear %I 38400 linux" << std::endl;
+      std::cout << "Autologin enabled." << std::endl;
+    } else {
+      std::cout << "Configuring autologin failed." << std::endl;
+    }
+  } else {
+    if (init::lib::is_file(conf_file)) {
+      std::filesystem::remove(conf_file);
+      std::cout << "Autologin disabled." << std::endl;
+    }
+  }
+}
+
 static std::optional<std::tuple<std::filesystem::path,std::optional<std::string/*uuid*/>,std::optional<std::string/*fstype*/>>>
   determine_boot_partition()
 {
@@ -979,6 +1003,7 @@ static std::filesystem::path do_init(bool transient)
     init::hooks::setup_locale(newroot, inifile.get());
     init::hooks::setup_keymap(newroot, inifile.get());
     init::hooks::setup_ssh_key(newroot, inifile.get());
+    init::hooks::setup_autologin(newroot, inifile.get());
 
     #if 0
     setup_wireguard(newroot);

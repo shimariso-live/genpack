@@ -97,6 +97,7 @@ namespace init {
         void setup_keymap(const std::filesystem::path& newroot, inifile_t inifile);
         void setup_wifi(const std::filesystem::path& newroot, inifile_t inifile);
         void setup_ssh_key(const std::filesystem::path& newroot, inifile_t inifile);
+        void setup_autologin(const std::filesystem::path& newroot, inifile_t inifile);
         void post_init(const std::filesystem::path& newroot, 
             std::optional<std::tuple<std::filesystem::path,std::optional<std::string/*uuid*/>,std::optional<std::string/*fstype*/>>>,
             inifile_t inifile);
