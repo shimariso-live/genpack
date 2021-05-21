@@ -566,7 +566,7 @@ int create_iso9660_image(const std::filesystem::path& image, const std::optional
     { 
         std::ofstream grubcfg(grubcfg_path);
         grubcfg << "set BOOT_PARTITION=$root\n"
-        << "loopback /system.img\n"
+        << "loopback loop /system.img\n"
         << "set root=loop\n"
         << "set prefix=($root)/boot/grub" << std::endl;
     }
