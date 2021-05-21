@@ -80,6 +80,7 @@ namespace init {
         bool set_network_config(const std::filesystem::path& rootdir,
             const std::optional<std::tuple<std::string/*address*/,std::optional<std::string>/*gateway*/,std::optional<std::string>/*dns*/,std::optional<std::string>/*fallback_dns*/>>& ipv4 = std::nullopt, 
             const std::optional<std::tuple<std::string/*address*/,std::optional<std::string>/*gateway*/,std::optional<std::string>/*dns*/,std::optional<std::string>/*fallback_dns*/>>& ipv6 = std::nullopt);
+        bool set_ssh_key(const std::filesystem::path& rootdir, const std::string& ssh_key);
     }
 
     namespace hooks {
@@ -95,6 +96,7 @@ namespace init {
         void setup_locale(const std::filesystem::path& newroot, inifile_t inifile);
         void setup_keymap(const std::filesystem::path& newroot, inifile_t inifile);
         void setup_wifi(const std::filesystem::path& newroot, inifile_t inifile);
+        void setup_ssh_key(const std::filesystem::path& newroot, inifile_t inifile);
         void post_init(const std::filesystem::path& newroot, 
             std::optional<std::tuple<std::filesystem::path,std::optional<std::string/*uuid*/>,std::optional<std::string/*fstype*/>>>,
             inifile_t inifile);

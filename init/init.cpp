@@ -419,9 +419,9 @@ bool init::lib::set_root_password(const std::filesystem::path& rootdir, const st
     return exec("/usr/bin/passwd", {"-d", "root"}, rootdir) == 0;
   }
   // else
-  std::string buf("root:");
-  buf += password;
-  return exec("/usr/sbin/chpasswd", {buf}, rootdir) == 0;
+  return exec("/usr/sbin/chpasswd", {}, rootdir, [&password](std::ostream& o) {
+    o << "root:" << password << std::flush;
+  }) == 0;
 }
 
 bool init::lib::set_timezone(const std::filesystem::path& rootdir, const std::string& timezone)
@@ -508,6 +508,30 @@ bool init::lib::set_network_config(const std::filesystem::path& rootdir,
   }
 
   f << "MulticastDNS=yes\nLLMNR=yes" << std::endl;
+  return true;
+}
+
+bool init::lib::set_ssh_key(const std::filesystem::path& rootdir,  const std::string& ssh_key)
+{
+  std::regex re( R"(^(.+?\s.+?)(\s.*|$))");
+  std::smatch m;
+  if (!std::regex_search(ssh_key, m, re)) return false;
+  std::string ssh_key_essential = m.str(1);
+  auto ssh_dir = rootdir / "root/.ssh";
+  std::filesystem::create_directories(ssh_dir);
+  auto authorized_keys = ssh_dir / "authorized_keys";
+  {
+    std::ifstream f(authorized_keys);
+    for( std::string line; std::getline( f, line ); ) {
+      if (!std::regex_search(line, m, re)) continue;
+      //else
+      if (m.str(1) == ssh_key_essential) return true/*already there*/;
+    }
+  }
+
+  std::ofstream f(authorized_keys, std::fstream::app);
+  f << ssh_key << std::endl;
+
   return true;
 }
 
@@ -676,7 +700,7 @@ __attribute__((weak)) void init::hooks::setup_network(const std::filesystem::pat
   }
 
   if (ipv6_address) {
-    ipv6 = std::make_tuple(ip_address, 
+    ipv6 = std::make_tuple(ipv6_address, 
       optional(iniparser_getstring(inifile, ":ipv6_gateway", NULL)), 
       optional(iniparser_getstring(inifile, ":ipv6_dns", NULL)), 
       optional(iniparser_getstring(inifile, ":ipv6_fallback_dns", NULL))
@@ -731,10 +755,22 @@ __attribute__((weak)) void init::hooks::setup_keymap(const std::filesystem::path
 {
   auto keymap = iniparser_getstring(inifile, ":keymap", NULL);
   if (keymap) {
-    if (init::lib::set_keymap(newroot, keymap) == 0) {
+    if (init::lib::set_keymap(newroot, keymap)) {
       std::cout << "Keymap set to " << keymap << "." << std::endl;
     } else {
       std::cout << "Keymap could not be configured." << std::endl;
+    }
+  }
+}
+
+__attribute__((weak)) void init::hooks::setup_ssh_key(const std::filesystem::path& newroot, inifile_t inifile)
+{
+  auto ssh_key = iniparser_getstring(inifile, ":ssh_key", NULL);
+  if (ssh_key) {
+    if (init::lib::set_ssh_key(newroot, ssh_key)) {
+      std::cout << "SSH key added to authorized_keys(or already there)." << std::endl;
+    } else {
+      std::cout << "SSH key was not added." << std::endl;
     }
   }
 }
@@ -747,7 +783,7 @@ __attribute__((weak)) void init::hooks::setup_wifi(const std::filesystem::path& 
   if (!wifi_ssid) return;
   //else
   if (wifi_key) {
-    if (init::lib::set_wifi_config(newroot, wifi_ssid, wifi_key) == 0) {
+    if (init::lib::set_wifi_config(newroot, wifi_ssid, wifi_key)) {
       init::lib::set_network_config(newroot); // Assume DHCP when WiFi is enabled
       std::cout << "WiFi SSID: " << wifi_ssid << std::endl;
     } else {
@@ -804,7 +840,13 @@ static std::filesystem::path do_init(bool transient)
   auto mnt_boot = mnt / "boot";
 
   std::filesystem::create_directories(mnt_boot);
-  if (init::lib::mount(boot_partition_dev_path, mnt_boot) != 0) RUNTIME_ERROR("mount boot_partition");
+  auto rst = 
+    init::lib::mount(boot_partition_dev_path, mnt_boot, boot_partition_fstype? boot_partition_fstype.value() : "auto", 
+    readonly_boot_partition? MS_RDONLY : MS_RELATIME, 
+    boot_partition_fstype == "vfat" ? "iocharset=utf8,codepage=437,fmask=177,dmask=077" : "");
+  if (rst != 0) {
+    RUNTIME_ERROR("Mounting boot partition failed");
+  }
   //else
   std::cout << "Boot partition mounted." << std::endl;
 
@@ -936,11 +978,12 @@ static std::filesystem::path do_init(bool transient)
     init::hooks::setup_timezone(newroot, inifile.get());
     init::hooks::setup_locale(newroot, inifile.get());
     init::hooks::setup_keymap(newroot, inifile.get());
+    init::hooks::setup_ssh_key(newroot, inifile.get());
+
     #if 0
     setup_wireguard(newroot);
     setup_openvpn(newroot);
     setup_zabbix_agent(newroot);
-    setup_ssh_key(newroot);
     setup_zram_swap(newroot);
     #endif
   }
@@ -961,8 +1004,10 @@ static std::filesystem::path do_init(bool transient)
   if (data_partition) {
     auto data_partition_dev_path = std::get<0>(data_partition.value());
 
-    const auto docker = newroot / "var/lib/docker";
-    if (init::lib::is_dir(docker) && init::lib::mount(data_partition_dev_path, docker, "btrfs", MS_RELATIME, "subvol=docker") != 0) {
+    const auto& docker = newroot / "var/lib/docker";
+    const auto& docker_image = docker / "image"; // check if docker has already been used with overlay
+    if (init::lib::is_dir(docker) && !init::lib::is_dir(docker_image) 
+      && init::lib::mount(data_partition_dev_path, docker, "btrfs", MS_RELATIME, "subvol=docker") != 0) {
       std::cout << "Docker subvolume couldn't be mounted." << std::endl;
     }
   }
