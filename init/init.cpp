@@ -426,10 +426,10 @@ bool init::lib::set_root_password(const std::filesystem::path& rootdir, const st
 
 bool init::lib::set_timezone(const std::filesystem::path& rootdir, const std::string& timezone)
 {
-  std::filesystem::path target(rootdir / "../usr/share/zoneinfo" / timezone);
+  std::filesystem::path zoneinfo("../usr/share/zoneinfo");
   std::filesystem::path link(rootdir / "etc/localtime");
   unlink(link.c_str());
-  return symlink(target.c_str(), link.c_str()) == 0;
+  return symlink((zoneinfo / timezone).c_str(), link.c_str()) == 0;
 }
 
 bool init::lib::set_locale(const std::filesystem::path& rootdir, const std::string& locale)
