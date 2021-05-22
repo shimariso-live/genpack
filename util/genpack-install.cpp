@@ -659,7 +659,7 @@ int install_self(const std::filesystem::path& system_image,
         std::filesystem::copy_file(system_image, new_system_image);
         if (is_image_file_loopbacked(installed_system_image)) {
             std::filesystem::rename(installed_system_image, current_system_image);
-            std::cout << "Original system image preserved." << std::endl;
+            std::cout << "Original system image preserved..." << std::flush;
         }
         std::filesystem::rename(new_system_image, installed_system_image);
     }

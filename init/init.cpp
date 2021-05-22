@@ -461,7 +461,7 @@ bool init::lib::set_wifi_config(const std::filesystem::path& rootdir, const std:
     conf << "\tpsk=\"" << key << "\"\n";
     conf << "}" << std::endl;
   }
-  return exec("/bin/systemctl", {"enable", "wpa_supplicant@wlan0"}) == 0;
+  return exec("/bin/systemctl", {"enable", "wpa_supplicant@wlan0"}, rootdir) == 0;
 }
 
 bool init::lib::set_network_config(const std::filesystem::path& rootdir,
