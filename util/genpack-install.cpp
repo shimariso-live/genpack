@@ -433,6 +433,40 @@ void copy_system_cfg_ini(const std::optional<std::filesystem::path>& system_cfg,
     }
 }
 
+bool install_bootloader(const std::filesystem::path& disk, const std::filesystem::path& boot_partition_dir, bool bios_compatible = true)
+{
+    auto efi_boot = boot_partition_dir / "efi/boot";
+    std::filesystem::create_directories(efi_boot);
+    // install EFI bootloader
+    if (exec("grub-mkimage", {"-p", "/boot/grub", "-o", (efi_boot / "bootx64.efi").string(), "-O", "x86_64-efi", 
+        "xfs","btrfs","fat","part_gpt","part_msdos","normal","linux","echo","all_video","test","multiboot","multiboot2","search","sleep","iso9660","gzio",
+        "lvm","chain","configfile","cpuid","minicmd","gfxterm_background","png","font","terminal","squash4","serial","loopback","videoinfo","videotest",
+        "blocklist","probe","efi_gop","efi_uga", "keystatus"}) != 0) return false;
+    if (bios_compatible) {
+        // install BIOS bootloader
+        if (exec("grub-install", {"--target=i386-pc", "--recheck", std::string("--boot-directory=") + (boot_partition_dir / "boot").string(),
+            "--modules=xfs btrfs fat part_msdos normal linux echo all_video test multiboot multiboot2 search sleep gzio lvm chain configfile cpuid minicmd font terminal serial squash4 loopback videoinfo videotest blocklist probe gfxterm_background png keystatus",
+            disk.string()}) != 0) return false;
+    }
+    // create boot config file
+    auto grub_dir = boot_partition_dir / "boot/grub";
+    std::filesystem::create_directories(grub_dir);
+    {
+        std::ofstream grubcfg(grub_dir / "grub.cfg");
+        if (grubcfg) {
+            grubcfg << "insmod echo\ninsmod linux\ninsmod cpuid\n"
+                << "set BOOT_PARTITION=$root\n"
+                << "loopback loop /system.img\n"
+                << "set root=loop\nset prefix=($root)/boot/grub\nnormal"
+                << std::endl;
+        } else {
+            std::cout << "Writing grub.cfg failed." << std::endl;
+            return false;
+        }
+    }
+    return true;
+}
+
 int install_to_disk(const std::filesystem::path& disk, const std::optional<std::filesystem::path>& _system_image, bool data_partition = true, 
     const std::optional<std::filesystem::path>& system_cfg = std::nullopt, const std::optional<std::filesystem::path>& system_ini = std::nullopt,
     const std::optional<std::string>& label = std::nullopt, bool yes = false)
@@ -507,32 +541,13 @@ int install_to_disk(const std::filesystem::path& disk, const std::optional<std::
         auto tempdir = create_tempmount("/tmp/genpack-install-", boot_partition_path, "vfat", MS_RELATIME, "fmask=177,dmask=077");
         std::cout << "Done" << std::endl;
         auto tempdir_path = std::filesystem::path(tempdir.get());
-        auto efi_boot = tempdir_path / "efi/boot";
-        std::filesystem::create_directories(efi_boot);
-        std::cout << "Installing UEFI bootloader..." << std::flush;
-        exec("grub-mkimage", {"-p", "/boot/grub", "-o", (efi_boot / "bootx64.efi").string(), "-O", "x86_64-efi", 
-            "xfs","btrfs","fat","part_gpt","part_msdos","normal","linux","echo","all_video","test","multiboot","multiboot2","search","sleep","iso9660","gzio",
-            "lvm","chain","configfile","cpuid","minicmd","gfxterm_background","png","font","terminal","squash4","loopback","videoinfo","videotest",
-            "blocklist","probe","efi_gop","efi_uga", "keystatus"});
-        std::cout << "Done" << std::endl;
-        if (bios_compatible) {
-            std::cout << "Installing BIOS bootloader" << std::endl;
-            exec("grub-install", {"--target=i386-pc", "--recheck", std::string("--boot-directory=") + (tempdir_path / "boot").string(),
-                "--modules=xfs btrfs fat part_msdos normal linux echo all_video test multiboot multiboot2 search sleep gzio lvm chain configfile cpuid minicmd font terminal squash4 loopback videoinfo videotest blocklist probe gfxterm_background png keystatus",
-                disk.string()});
-        }        
-        std::cout << "Creating boot configuration file..." << std::flush;
-        auto grub_dir = tempdir_path / "boot/grub";
-        std::filesystem::create_directories(grub_dir);
-        {
-            std::ofstream grubcfg(grub_dir / "grub.cfg");
-            if (grubcfg.fail()) throw std::runtime_error("ofstream('/boot/grub/grub.cfg')");
-            grubcfg << "insmod echo\ninsmod linux\ninsmod cpuid\n"
-                << "set BOOT_PARTITION=$root\n"
-                << "loopback loop /system.img\n"
-                << "set root=loop\nset prefix=($root)/boot/grub\nnormal"
-                << std::endl;
+
+        std::cout << "Installing bootloader..." << std::flush;
+        if (!install_bootloader(disk, tempdir_path, bios_compatible)) {
+            std::cout << "Failed" << std::endl;
+            return 1;
         }
+        //else
         std::cout << "Done" << std::endl;
         if (system_cfg || system_ini) {
             std::cout << "Copying system config file..." << std::flush;
