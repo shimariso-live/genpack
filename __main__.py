@@ -294,6 +294,7 @@ def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_js
     remove_root_password(upper_dir)
     make_ld_so_conf_latest(upper_dir)
     create_default_iptables_rules(upper_dir)
+    set_locale_to_envvar(upper_dir)
 
     # per-package setup
     newest_pkg_file = 0
@@ -521,6 +522,9 @@ def make_ld_so_conf_latest(root_dir):
 
 def create_default_iptables_rules(root_dir):
     subprocess.check_call(sudo(["touch", os.path.join(root_dir, "var/lib/iptables/rules-save"), os.path.join(root_dir, "var/lib/ip6tables/rules-save")]))
+
+def set_locale_to_envvar(root_dir):
+    subprocess.check_call(sudo(["sed", "-i", r"s/^export LANG=.\+$/. \/etc\/locale.conf \&\& export LANG/", os.path.join(root_dir, "etc/profile.env") ]))
 
 def enable_services(root_dir, services):
     if not isinstance(services, list): services = [services]
