@@ -652,6 +652,32 @@ static std::filesystem::path do_init(bool transient)
     std::cout << "xs_open failed. config wouldn't be applied properly." << std::endl;
   }
 
+  const auto docker = newroot / "var/lib/docker";
+  if (init::lib::is_dir(docker) && std::filesystem::is_empty(docker)) {
+    const auto data_docker = newroot / "run/initramfs/rw/docker";
+    std::filesystem::create_directories(data_docker);
+    if (init::lib::bind_mount(data_docker, docker) == 0) {
+      std::cout << "Docker data directory mounted." << std::endl;
+    }
+  }
+  const auto mysql = newroot / "var/lib/mysql";
+  if (init::lib::is_dir(mysql)) {
+    const auto data_mysql = newroot / "run/initramfs/rw/mysql";
+    std::filesystem::create_directories(data_mysql);
+    if (std::filesystem::is_empty(data_mysql)) {
+      std::cout << "Setting up MySQL data directory..." << std::flush;
+      if (init::lib::cp_a(mysql / ".", data_mysql) == 0) {
+        std::cout << "Done." << std::endl;
+      } else {
+        std::cout << "Failed." << std::endl;
+        std::filesystem::remove_all(data_mysql);
+      }
+    }
+    if (init::lib::is_dir(data_mysql) && init::lib::bind_mount(data_mysql, mysql) == 0) {
+      std::cout << "MySQL data directory mounted." << std::endl;
+    }
+  }
+
   return newroot;
 }
 #else
@@ -922,7 +948,7 @@ static std::filesystem::path do_init(bool transient)
       auto data_partition_fstype = std::get<2>(data_partition.value());
       if (data_partition_fstype == "btrfs" && init::lib::mount(data_partition_dev_path, mnt_data, "btrfs") == 0) {
         std::cout << "Data partition " << data_partition_dev_path << " found." << std::endl;
-        for (auto name:{"rw","docker","swap"}) {
+        for (auto name:{"rw","docker","mysql","swap"}) {
           if (!std::filesystem::exists(mnt_data / name)) {
             if (!create_btrfs_subvolume(mnt_data / name)) {
               std::cout << "Failed to create subvolume " << name << " under data partition." << std::endl;
@@ -1030,10 +1056,34 @@ static std::filesystem::path do_init(bool transient)
     auto data_partition_dev_path = std::get<0>(data_partition.value());
 
     const auto& docker = newroot / "var/lib/docker";
-    const auto& docker_image = docker / "image"; // check if docker has already been used with overlay
-    if (init::lib::is_dir(docker) && !init::lib::is_dir(docker_image) 
-      && init::lib::mount(data_partition_dev_path, docker, "btrfs", MS_RELATIME, "subvol=docker") != 0) {
+    if (init::lib::is_dir(docker) && std::filesystem::is_empty(docker) 
+      && init::lib::mount(data_partition_dev_path, docker, "btrfs", MS_RELATIME, "subvol=docker") == 0) {
+      std::cout << "Docker subvolume mounted." << std::endl;
+    } else {
       std::cout << "Docker subvolume couldn't be mounted." << std::endl;
+    }
+
+    const auto& mysql = newroot / "var/lib/mysql";
+    if (init::lib::is_dir(mysql)) {
+      const auto& mnt_mysql = mnt / "mysql";
+      std::filesystem::create_directories(mnt_mysql);
+      if (init::lib::mount(data_partition_dev_path, mnt_mysql, "btrfs", MS_RELATIME, "subvol=mysql") == 0) {
+        if (std::filesystem::is_empty(mnt_mysql)) {
+          std::cout << "Setting up MySQL data subvolume..." << std::flush;
+          if (init::lib::cp_a(mysql / ".", mnt_mysql) == 0) {
+            std::cout << "Done." << std::endl;
+          } else {
+            std::cout << "Failed." << std::endl;
+            umount(mnt_mysql.c_str());
+          }
+        }
+      }
+      if (init::lib::is_mounted(mnt_mysql) && init::lib::move_mount(mnt_mysql, mysql) == 0) {
+        std::cout << "MySQL data subvolume is mounted." << std::endl;
+      } else {
+        std::cout << "MySQL data subvolume is not mounted." << std::endl;
+        umount(mnt_mysql.c_str());
+      }
     }
   }
 
