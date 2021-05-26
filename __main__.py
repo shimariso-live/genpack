@@ -524,7 +524,7 @@ def create_default_iptables_rules(root_dir):
     subprocess.check_call(sudo(["touch", os.path.join(root_dir, "var/lib/iptables/rules-save"), os.path.join(root_dir, "var/lib/ip6tables/rules-save")]))
 
 def set_locale_to_envvar(root_dir):
-    subprocess.check_call(sudo(["sed", "-i", r"s/^export LANG=.\+$/. \/etc\/locale.conf \&\& export LANG/", os.path.join(root_dir, "etc/profile.env") ]))
+    subprocess.check_call(sudo(["sed", "-i", r"s/^export LANG=.\+$/\[ -f \/etc\/locale\.conf \] \&\& . \/etc\/locale.conf \&\& export LANG/", os.path.join(root_dir, "etc/profile.env") ]))
 
 def enable_services(root_dir, services):
     if not isinstance(services, list): services = [services]
