@@ -531,8 +531,8 @@ def enable_services(root_dir, services):
     subprocess.check_call(sudo(["systemd-nspawn", "-q", "-M", CONTAINER_NAME, "-D", root_dir, "systemctl", "enable"] + services))
 
 def pack(upper_dir, outfile, compression="gzip"):
-    cmdline = ["mksquashfs", upper_dir, outfile, "-noappend"]
-    if compression == "xz": cmdline += ["-comp", "xz", "-no-exports", "-b", "1M", "-Xbcj", "x86"]
+    cmdline = ["mksquashfs", upper_dir, outfile, "-noappend", "-no-exports"]
+    if compression == "xz": cmdline += ["-comp", "xz", "-b", "1M", "-Xbcj", "x86"]
     elif compression == "gzip": cmdline += ["-Xcompression-level", "1"]
     elif compression == "lzo": cmdline += ["-comp", "lzo"]
     else: raise BaseException("Unknown compression type %s" % compression)
