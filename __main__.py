@@ -221,7 +221,7 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
             "strace", "vim", "tcpdump", "netkit-telnetd"])
         if os.path.isfile(os.path.join(gentoo_dir, "build.sh")):
             lower_exec(gentoo_dir, cache_dir, portage_dir, ["/build.sh"])
-        lower_exec(gentoo_dir, cache_dir, portage_dir, ["sh", "-c", "emerge -bk --binpkg-respect-use=y @preserved-rebuild && emerge --depclean && eselect python update && eselect python cleanup && etc-update --automode -5 && eclean-dist -d && eclean-pkg -d"])
+        lower_exec(gentoo_dir, cache_dir, portage_dir, ["sh", "-c", "emerge -bk --binpkg-respect-use=y @preserved-rebuild && emerge --depclean && etc-update --automode -5 && eclean-dist -d && eclean-pkg -d"])
         with open(done_file, "w") as f:
             pass
     
