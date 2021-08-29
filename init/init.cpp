@@ -14,6 +14,8 @@
 #include <libmount/libmount.h>
 #include <blkid/blkid.h>
 
+//#define PARAVIRT
+
 #include "init.h"
 
 int init::lib::exec(const std::string& cmd, const std::vector<std::string>& args, 
@@ -243,9 +245,64 @@ std::optional<std::tuple<std::filesystem::path,std::optional<std::string/*uuid*/
   return std::nullopt;
 }
 
+std::map<std::filesystem::path,std::tuple<std::optional<std::string>/*uuid*/,std::optional<std::string>/*fstype*/>> init::lib::get_all_partitions()
+{
+  blkid_cache cache;
+  if (blkid_get_cache(&cache, "/dev/null") < 0) throw std::runtime_error("blkid_get_cache(/dev/null) failed");
+
+  std::map<std::filesystem::path,std::tuple<std::optional<std::string>/*uuid*/,std::optional<std::string>/*fstype*/>> partitions;
+  try {
+    if (blkid_probe_all(cache) < 0) throw std::runtime_error("blkid_probe_all() failed");
+
+    blkid_dev_iterate dev_iter = blkid_dev_iterate_begin(cache);
+    if (!dev_iter) throw std::runtime_error("blkid_dev_iterate_begin() failed");
+    try {
+      blkid_dev dev = NULL;
+      while (blkid_dev_next(dev_iter, &dev) == 0) {
+        dev = blkid_verify(cache, dev);
+        if (dev) {
+          blkid_tag_iterate tag_iter = blkid_tag_iterate_begin(dev);
+          if (!tag_iter) throw std::runtime_error("blkid_tag_iterate_begin() failed");
+          try {
+            const char *_type, *_value;
+            const char * uuid = NULL;
+            const char * fstype = NULL;
+            while (blkid_tag_next(tag_iter, &_type, &_value) == 0) {
+              if (strcmp(_type,"TYPE") == 0) {
+                fstype = _value;
+              } else if (strcmp(_type, "UUID") == 0) {
+                uuid = _value;
+              }              
+            }
+            partitions[blkid_dev_devname(dev)] = std::make_tuple(uuid? std::optional(uuid) : std::nullopt, fstype? std::optional(fstype) : std::nullopt);
+          }
+          catch (...) {
+            blkid_tag_iterate_end(tag_iter);
+            throw;
+          }
+          blkid_tag_iterate_end(tag_iter);
+        }
+      }
+    }
+    catch (...) {
+      blkid_dev_iterate_end(dev_iter);
+      throw;
+    }
+    blkid_dev_iterate_end(dev_iter);
+  }
+  catch (...) {
+    blkid_put_cache(cache);
+    throw;
+  }
+  blkid_put_cache(cache);
+  return partitions;
+}
+
 bool init::lib::is_block_readonly(const std::filesystem::path& path)
 {
-  if (!std::filesystem::is_block_file(path)) RUNTIME_ERROR("Not a block device");
+  if (!std::filesystem::is_block_file(path)) {
+    RUNTIME_ERROR(path.string() + " is not a block device");
+  }
   //else
   int fd = open(path.c_str(), O_RDONLY);
   if (fd < 0) RUNTIME_ERROR_WITH_ERRNO("open");
@@ -253,6 +310,13 @@ bool init::lib::is_block_readonly(const std::filesystem::path& path)
   int readonly;
   if (ioctl(fd, BLKROGET, &readonly) < 0) RUNTIME_ERROR_WITH_ERRNO("ioctl");
   // else
+  if (!readonly) {
+    // check if squashfs
+    uint8_t buf[4];
+    if (read(fd, buf, sizeof(buf)) < 0) RUNTIME_ERROR_WITH_ERRNO("read");
+    //else
+    if (buf[0] == 0x68 && buf[1] == 0x73 && buf[2] == 0x71 && buf[3] == 0x73) readonly = 1; // it's squashfs
+  }
   close(fd);
   return (bool)readonly;
 }
@@ -546,6 +610,14 @@ __attribute__((weak)) void init::hooks::post_init(const std::filesystem::path& n
   std::optional<std::tuple<std::filesystem::path,std::optional<std::string/*uuid*/>,std::optional<std::string/*fstype*/>>>,
   inifile_t inifile) {}
 
+static void ls(const std::filesystem::path& dir)
+{
+  for (const std::filesystem::directory_entry& x : std::filesystem::directory_iterator(dir)) {
+    std::cout << x.path() << ' ';
+  }
+  std::cout << std::endl;
+}
+
 #ifdef PARAVIRT
 __attribute__((weak)) void init::hooks::setup_hostname(const std::filesystem::path& newroot, inifile_t inifile)
 {
@@ -570,13 +642,17 @@ static std::filesystem::path do_init(bool transient)
   init::hooks::print_banner();
 
   // mount boot partition
-  std::filesystem::path boot_partition_dev_path("/dev/xvda1");
-  auto readonly_boot_partition = init::lib::is_block_readonly(boot_partition_dev_path); 
+  auto partitions = init::lib::get_all_partitions();
+  auto boot_partition = std::find_if(partitions.begin(), partitions.end(), [](const auto& i) {
+    return (i.first == "/dev/vda" || i.first == "dev/xvda1") && std::get<1>(i.second) != "swap";
+  });
+  if (boot_partition == partitions.end()) RUNTIME_ERROR("Neither /dev/vda or /dev/xvda1 found");
+  auto readonly_boot_partition = init::lib::is_block_readonly(boot_partition->first);
 
   std::filesystem::path mnt("/mnt");
   auto mnt_boot = mnt / "boot";
   std::filesystem::create_directories(mnt_boot);
-  if (init::lib::mount(boot_partition_dev_path, mnt_boot, "auto", readonly_boot_partition? MS_RDONLY : MS_RELATIME) != 0) {
+  if (init::lib::mount(boot_partition->first, mnt_boot, "auto", readonly_boot_partition? MS_RDONLY : MS_RELATIME) != 0) {
     RUNTIME_ERROR("mount /mnt/boot");
   }
   //else
@@ -601,17 +677,31 @@ static std::filesystem::path do_init(bool transient)
   auto mnt_rw = mnt / "rw";
   std::filesystem::create_directory(mnt_rw);
 
+  auto rw_partition = std::find_if(partitions.begin(), partitions.end(), [](const auto& i) {
+    return (i.first == "/dev/vdb" || i.first == "dev/xvda2") && std::get<1>(i.second) != "swap";
+  });
+
   if (!transient) {
     if (readonly_boot_partition) {
-      if (init::lib::mount("/dev/xvda2", mnt_rw) != 0) RUNTIME_ERROR("mount /mnt/rw");
+      if (rw_partition != partitions.end()) {
+        // data partition
+        if (init::lib::mount(rw_partition->first, mnt_rw) != 0) RUNTIME_ERROR("mount /mnt/rw");
+      } else {
+        // virtiofs
+        if (init::lib::mount("fs", mnt_rw, "virtiofs") != 0) RUNTIME_ERROR("mount /mnt/rw via virtiofs");
+      }
     } else {
       if (init::lib::bind_mount(mnt_boot, mnt_rw) != 0) RUNTIME_ERROR("mount --bind /mnt/boot /mnt/rw");
     }
     std::cout << "RW Layer mounted." << std::endl;
 
     // activate swap
-    if (readonly_boot_partition && init::lib::is_block("/dev/xvda3")) {
-      init::lib::exec(init::progs::SWAPON, {"/dev/xvda3"});
+    auto swap_partition = std::find_if(partitions.begin(), partitions.end(), [](const auto& i) {
+      return std::get<1>(i.second) == "swap";
+    });
+
+    if (swap_partition != partitions.end()) {
+      init::lib::exec(init::progs::SWAPON, {swap_partition->first});
       std::cout << "Swap partition enabled." << std::endl;
     } else {
       auto swapfile = mnt_boot / "swapfile";
@@ -650,6 +740,13 @@ static std::filesystem::path do_init(bool transient)
     }
   } else {
     std::cout << "xs_open failed. config wouldn't be applied properly." << std::endl;
+  }
+
+  // get hostname from kernel arg
+  auto cmdline = init::lib::kernel_cmdline();
+  auto i = std::find_if(cmdline.begin() , cmdline.end(), [](const auto& arg) { return arg.starts_with("hostname="); });
+  if (i != cmdline.end()) {
+    init::lib::set_hostname(newroot, i->substr(9));
   }
 
   const auto docker = newroot / "var/lib/docker";

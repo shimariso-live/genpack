@@ -5,6 +5,7 @@
 #include <vector>
 #include <variant>
 #include <functional>
+#include <map>
 
 #ifdef PARAVIRT
 extern "C" {
@@ -65,6 +66,8 @@ namespace init {
             search_partition(const std::string& name, const std::string& value);
         std::optional<std::tuple<std::filesystem::path,std::optional<std::string/*uuid*/>,std::optional<std::string/*fstype*/>>>
             get_partition_by_uuid(const std::string& uuid, int max_retry = 3);
+        std::map<std::filesystem::path,std::tuple<std::optional<std::string>/*uuid*/,std::optional<std::string>/*fstype*/>> 
+            get_all_partitions();
         bool is_block_readonly(const std::filesystem::path& path);
 
         int cp_a(const std::filesystem::path& src, const std::filesystem::path& dst);

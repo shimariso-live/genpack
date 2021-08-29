@@ -49,6 +49,7 @@ def lower_exec(lower_dir, cache_dir, portage_dir, cmdline, nspawn_opts=[]):
     subprocess.check_call(sudo(
         ["systemd-nspawn", "-q", "-M", CONTAINER_NAME, "-D", lower_dir, 
             "--bind=%s:/var/cache" % os.path.abspath(cache_dir),
+            "--capability=CAP_MKNOD,CAP_SYS_ADMIN",
             "--bind-ro=%s:/var/db/repos/gentoo" % os.path.abspath(portage_dir) ]
             + nspawn_opts + cmdline)
     )
@@ -308,6 +309,7 @@ def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_js
         if os.path.isfile(os.path.join(upper_dir, "pkgbuild")):
             subprocess.check_call(sudo(["systemd-nspawn", "-q", "-M", CONTAINER_NAME, "-D", gentoo_dir, "--overlay=+/:%s:/" % os.path.abspath(upper_dir), 
                 "-E", "PROFILE=%s" % profile, "-E", "ARTIFACT=%s" % artifact, 
+                "--capability=CAP_MKNOD",
                 "sh", "-c", "/pkgbuild && rm -f /pkgbuild" ]))
 
     # enable services
@@ -452,7 +454,7 @@ def scan_pkg_dep(gentoo_dir, pkg_map, pkgnames, pkgs = None):
     return pkgs
 
 def is_path_excluded(path):
-    for expr in ["/run/","/var/run/","/usr/share/man/","/usr/share/doc/","/usr/share/gtk-doc/","/usr/share/info/",
+    for expr in ["/run/","/var/run/","/var/lock/","/usr/share/man/","/usr/share/doc/","/usr/share/gtk-doc/","/usr/share/info/",
         "/usr/include/","/var/cache/",re.compile(r'^/usr/lib/python[0-9\.]+?/test/'),re.compile(r'\.a$'),
         re.compile(r"\/gschemas.compiled$"), re.compile(r"\/giomodule.cache$")]:
         if isinstance(expr, re.Pattern):
