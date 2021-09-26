@@ -32,11 +32,12 @@ namespace init {
         static const char* FSCK_FAT = "/usr/sbin/fsck.fat";
         static const char* BTRFS = "/sbin/btrfs";
         static const char* CHATTR = "/usr/bin/chattr";
+        static const char* EJECT = "/usr/bin/eject";
 #endif
         static const char* ALL[] = {
             CP, UMOUNT, MKSWAP, SWAPON
 #ifndef PARAVIRT
-            ,FSCK_FAT, BTRFS, CHATTR
+            ,FSCK_FAT, BTRFS, CHATTR, EJECT
 #endif
         };
     }
@@ -69,6 +70,8 @@ namespace init {
         std::map<std::filesystem::path,std::tuple<std::optional<std::string>/*uuid*/,std::optional<std::string>/*fstype*/>> 
             get_all_partitions();
         bool is_block_readonly(const std::filesystem::path& path);
+        std::optional<std::filesystem::path> devname_to_sysfs_path(const std::filesystem::path& blockdevice);
+        bool is_removable(const std::filesystem::path& blockdevice);
 
         int cp_a(const std::filesystem::path& src, const std::filesystem::path& dst);
 
@@ -81,6 +84,7 @@ namespace init {
         bool set_keymap(const std::filesystem::path& rootdir,  const std::string& keymap);
         bool set_wifi_config(const std::filesystem::path& rootdir, const std::string& ssid, const std::string& key);
         bool set_network_config(const std::filesystem::path& rootdir,
+            const std::optional<std::string>& network_interface = std::nullopt,
             const std::optional<std::tuple<std::string/*address*/,std::optional<std::string>/*gateway*/,std::optional<std::string>/*dns*/,std::optional<std::string>/*fallback_dns*/>>& ipv4 = std::nullopt, 
             const std::optional<std::tuple<std::string/*address*/,std::optional<std::string>/*gateway*/,std::optional<std::string>/*dns*/,std::optional<std::string>/*fallback_dns*/>>& ipv6 = std::nullopt);
         bool set_ssh_key(const std::filesystem::path& rootdir, const std::string& ssh_key);

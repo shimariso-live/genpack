@@ -308,6 +308,7 @@ def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_js
         newest_pkg_file = max(newest_pkg_file, sync_files(package_dir, upper_dir, r"^CONTENTS(\.|$)"))
         if os.path.isfile(os.path.join(upper_dir, "pkgbuild")):
             subprocess.check_call(sudo(["systemd-nspawn", "-q", "-M", CONTAINER_NAME, "-D", gentoo_dir, "--overlay=+/:%s:/" % os.path.abspath(upper_dir), 
+                "--bind=%s:/var/cache" % os.path.abspath(cache_dir),
                 "-E", "PROFILE=%s" % profile, "-E", "ARTIFACT=%s" % artifact, 
                 "--capability=CAP_MKNOD",
                 "sh", "-c", "/pkgbuild && rm -f /pkgbuild" ]))

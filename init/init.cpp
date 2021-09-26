@@ -4,6 +4,8 @@
 #include <sys/reboot.h>
 #include <sys/wait.h>
 #include <sys/statvfs.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
 
 #include <iostream>
 #include <fstream>
@@ -321,6 +323,30 @@ bool init::lib::is_block_readonly(const std::filesystem::path& path)
   return (bool)readonly;
 }
 
+std::optional<std::filesystem::path> init::lib::devname_to_sysfs_path(const std::filesystem::path& blockdevice)
+{
+  struct stat st;
+	if (stat(blockdevice.c_str(), &st) < 0) return std::nullopt;
+  auto dev = st.st_rdev;
+
+  std::filesystem::path sys_dev_block("/sys/dev/block");
+  auto dev_path = sys_dev_block / (std::to_string(major(dev)) + ":" + std::to_string(minor(dev)));
+  return init::lib::is_dir(dev_path)? std::make_optional(dev_path) : std::nullopt;
+}
+
+bool init::lib::is_removable(const std::filesystem::path& blockdevice)
+{
+  auto sysfs_path = devname_to_sysfs_path(blockdevice);
+  if (!sysfs_path) return false;
+  std::filesystem::path removable = sysfs_path.value() / "removable";
+  if (!init::lib::is_file(removable)) return false;
+  std::ifstream f(removable);
+  if (!f) return false;
+  std::string tf;
+  f >> tf;
+  return tf == "1";
+}
+
 static bool preserve_previous_system_image(const std::filesystem::path& boot)
 {
   auto previous_image = boot / "system.cur";
@@ -429,7 +455,7 @@ static std::filesystem::path setup_newroot(
   std::cout << "done." << std::endl;
 
   std::cout << "Setting up shutdown environment..." << std::flush;
-  for (auto path:{"bin", "lib", "usr/lib", "lib64", "usr/lib64", "usr/sbin"}) {
+  for (auto path:{"bin", "usr/bin", "lib", "usr/lib", "lib64", "usr/lib64", "usr/sbin"}) {
     auto src = std::filesystem::path("/") / path / ".";
     auto dst = initramfs / path;
     if (init::lib::is_dir(src)) {
@@ -529,6 +555,7 @@ bool init::lib::set_wifi_config(const std::filesystem::path& rootdir, const std:
 }
 
 bool init::lib::set_network_config(const std::filesystem::path& rootdir,
+  const std::optional<std::string>& network_interface,
   const std::optional<std::tuple<std::string/*address*/,std::optional<std::string>/*gateway*/,std::optional<std::string>/*dns*/,std::optional<std::string>/*fallback_dns*/>>& ipv4/* = std::nullopt*/, 
   const std::optional<std::tuple<std::string/*address*/,std::optional<std::string>/*gateway*/,std::optional<std::string>/*dns*/,std::optional<std::string>/*fallback_dns*/>>& ipv6/* = std::nullopt*/)
 {
@@ -539,19 +566,24 @@ bool init::lib::set_network_config(const std::filesystem::path& rootdir,
   std::ofstream f(network_config_dir / "50-generated-config.network");
   if (!f) return false;
   // else
-  f << "[Match]\nName=eth* wlan* enp* wlp*\n[Network]" << std::endl;
+  f << (std::string("[Match]\nName=") + (network_interface.value_or("eth* wlan* enp* wlp*")) + "\n[Network]") << std::endl;
 
   if (ipv4) {
-    f << "Address=" << std::get<0>(ipv4.value()) << std::endl;
-    auto gateway = std::get<1>(ipv4.value());
-    if (gateway) f << "Gateway=" << gateway.value() << std::endl;
-    auto dns = std::get<2>(ipv4.value());
-    if (dns) {
-      f << "DNS=" << dns.value() << std::endl;
-      auto fallback_dns = std::get<3>(ipv4.value());
-      if (fallback_dns)  f << "FallbackDNS=" << fallback_dns.value() << std::endl;
-    } else if (gateway) { // assume reachable to public dns if gateway is there
-      f << "DNS=8.8.8.8\nFallbackDNS=8.8.4.4" << std::endl;
+    auto address = std::get<0>(ipv4.value());
+    if (address != "none") {
+      f << "Address=" << address << std::endl;
+      auto gateway = std::get<1>(ipv4.value());
+      if (gateway) f << "Gateway=" << gateway.value() << std::endl;
+      auto dns = std::get<2>(ipv4.value());
+      if (dns) {
+        f << "DNS=" << dns.value() << std::endl;
+        auto fallback_dns = std::get<3>(ipv4.value());
+        if (fallback_dns)  f << "FallbackDNS=" << fallback_dns.value() << std::endl;
+      } else if (gateway) { // assume reachable to public dns if gateway is there
+        f << "DNS=8.8.8.8\nFallbackDNS=8.8.4.4" << std::endl;
+      }
+    } else {
+      f << "DHCP=ipv6" << std::endl;
     }
   } else {
     f << "DHCP=yes" << std::endl;
@@ -830,7 +862,9 @@ __attribute__((weak)) void init::hooks::setup_network(const std::filesystem::pat
     );
   }
 
-  if (init::lib::set_network_config(newroot, ipv4, ipv6)) {
+  auto network_interface = optional(iniparser_getstring(inifile, ":network_interface", NULL));
+
+  if (init::lib::set_network_config(newroot, network_interface, ipv4, ipv6)) {
     if (ip_address) std::cout << "IP address set to " << ip_address << std::endl;
     if (ipv6_address) std::cout << "IPv6 address set to " << ipv6_address << std::endl;
   } else {
@@ -1043,6 +1077,7 @@ static std::filesystem::path do_init(bool transient)
       std::filesystem::create_directory(mnt_data);
       auto data_partition_dev_path = std::get<0>(data_partition.value());
       auto data_partition_fstype = std::get<2>(data_partition.value());
+      //std::cout << data_partition_dev_path << " : " << data_partition_fstype.value_or("-") << std::endl;
       if (data_partition_fstype == "btrfs" && init::lib::mount(data_partition_dev_path, mnt_data, "btrfs") == 0) {
         std::cout << "Data partition " << data_partition_dev_path << " found." << std::endl;
         for (auto name:{"rw","docker","mysql","swap"}) {
@@ -1221,8 +1256,16 @@ static void shutdown(const std::optional<std::string>& arg)
   if (init::lib::umount_recursive(mnt) != 0) std::cout << "Unmount failed: run" << std::endl;
   std::cout << "done." << std::endl;
 #ifndef PARAVIRT
+  // perform fsck if FAT
   if (boot_partition_dev_path && boot_partition_dev_path.value().second == "vfat") {
     init::lib::exec(init::progs::FSCK_FAT, {"-a", "-w", boot_partition_dev_path.value().first});
+  }
+  // eject if removable
+  if (init::lib::is_file("/eject") && boot_partition_dev_path) {
+    auto drive = boot_partition_dev_path.value().first;
+    if (init::lib::is_removable(drive)) {
+      init::lib::exec(init::progs::EJECT, {drive});
+    }
   }
 #endif // PARAVIRT
 
