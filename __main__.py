@@ -24,16 +24,19 @@ def url_readlines(url):
     with urllib.request.urlopen(req) as res:
         return map(decode_utf8, res.readlines())
 
-def get_latest_stage3_tarball_url(base):
+def get_latest_stage3_tarball_url(base,arch):
     if not base.endswith('/'): base += '/'
-    for line in url_readlines(base + "releases/amd64/autobuilds/latest-stage3-amd64-systemd.txt"):
+    _arch = arch
+    if _arch == "x86_64": _arch = "amd64"
+    elif _arch == "aarch64": _arch = "arm64"
+    for line in url_readlines(base + "releases/" + _arch + "/autobuilds/latest-stage3-" + _arch + "-systemd.txt"):
         line = re.sub(r'#.*$', "", line.strip())
         if line == "": continue
         #else
         splitted = line.split(" ")
         if len(splitted) < 2: continue
         #else
-        return base + "releases/amd64/autobuilds/" + splitted[0]
+        return base + "releases/" + _arch + "/autobuilds/" + splitted[0]
     return None # not found
 
 def get_content_length(url):
@@ -142,7 +145,7 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
         profile = "default"
         if build_json and "profile" in build_json: profile = build_json["profile"]
 
-    stage3_tarball_url = get_latest_stage3_tarball_url(base)
+    stage3_tarball_url = get_latest_stage3_tarball_url(base,arch)
 
     arch_workdir = os.path.join(workdir, arch)
     os.makedirs(arch_workdir, exist_ok=True)
@@ -184,6 +187,9 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
             pass
 
     newest_file = link_files(os.path.join(".", "profiles", profile), gentoo_dir)
+    # remove irrelevant arch dependent settings
+    for i in glob.glob(os.path.join(gentoo_dir, "etc/portage/package.*/arch-*")):
+        if not i.endswith("-" + arch): os.unlink(i)
 
     # move files under /var/cache
     os.makedirs(cache_dir, exist_ok=True)
