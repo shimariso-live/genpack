@@ -281,7 +281,7 @@ def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_js
     files += ["/etc/passwd", "/etc/group", "/etc/shadow", "/etc/profile.env"]
     files += ["/etc/ld.so.conf", "/etc/ld.so.conf.d/."]
     files += ["/usr/lib/locale/locale-archive"]
-    files += ["/bin/sh", "/bin/sed", "/usr/bin/awk", "/usr/bin/python", "/usr/bin/vi", "/usr/bin/nano", 
+    files += ["/bin/sh", "/bin/sed", "/usr/bin/awk", "/usr/bin/python", "/usr/bin/nano", 
         "/bin/tar", "/usr/bin/unzip",
         "/usr/bin/wget", "/usr/bin/curl", "/usr/bin/telnet",
         "/usr/bin/make", "/usr/bin/diff", "/usr/bin/strings", "/usr/bin/strace", 
