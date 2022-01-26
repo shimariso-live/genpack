@@ -385,7 +385,7 @@ static void setup_proc_dev_sys()
   std::filesystem::create_directory("/proc");
   if (init::lib::mount("proc", "/proc", "proc", MS_NOEXEC|MS_NOSUID|MS_NODEV) != 0) RUNTIME_ERROR("mount /proc");
   std::filesystem::create_directory("/dev");
-  if (init::lib::mount("udev", "/dev", "devtmpfs", MS_NOSUID, "mode=0755,siz=10M") != 0) RUNTIME_ERROR("mount /dev");
+  if (init::lib::mount("udev", "/dev", "devtmpfs", MS_NOSUID, "mode=0755,size=10M") != 0) RUNTIME_ERROR("mount /dev");
   std::filesystem::create_directory("/sys");
   if (init::lib::mount("sysfs", "/sys", "sysfs", MS_NOEXEC|MS_NOSUID|MS_NODEV) != 0) RUNTIME_ERROR("mount /sys");
 }
@@ -566,7 +566,7 @@ bool init::lib::set_network_config(const std::filesystem::path& rootdir,
   std::ofstream f(network_config_dir / "50-generated-config.network");
   if (!f) return false;
   // else
-  f << (std::string("[Match]\nName=") + (network_interface.value_or("eth* wlan* enp* wlp*")) + "\n[Network]") << std::endl;
+  f << (std::string("[Match]\nName=") + (network_interface.value_or("eth* en* wl*")) + "\n[Network]") << std::endl;
 
   if (ipv4) {
     auto address = std::get<0>(ipv4.value());
