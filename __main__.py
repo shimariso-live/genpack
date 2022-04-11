@@ -284,7 +284,7 @@ def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_js
     files += ["/bin/sh", "/bin/sed", "/usr/bin/awk", "/usr/bin/python", "/usr/bin/nano", 
         "/bin/tar", "/usr/bin/unzip",
         "/usr/bin/wget", "/usr/bin/curl", "/usr/bin/telnet",
-        "/usr/bin/make", "/usr/bin/diff", "/usr/bin/strings", "/usr/bin/strace", 
+        "/usr/bin/make", "/usr/bin/diff", "/usr/bin/patch", "/usr/bin/strings", "/usr/bin/strace", 
         "/usr/bin/find", "/usr/bin/xargs", "/usr/bin/less"]
     files += ["/sbin/iptables", "/sbin/ip6tables", "/sbin/iptables-restore", "/sbin/ip6tables-restore", "/sbin/iptables-save", "/sbin/ip6tables-save"]
 
