@@ -50,7 +50,7 @@ def get_content_length(url):
 
 def lower_exec(lower_dir, cache_dir, portage_dir, cmdline, nspawn_opts=[]):
     subprocess.check_call(sudo(
-        ["systemd-nspawn", "-q", "-M", CONTAINER_NAME, "-D", lower_dir, 
+        ["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", lower_dir, 
             "--bind=%s:/var/cache" % os.path.abspath(cache_dir),
             "--capability=CAP_MKNOD,CAP_SYS_ADMIN",
             "--bind-ro=%s:/var/db/repos/gentoo" % os.path.abspath(portage_dir) ]
@@ -224,7 +224,7 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
 
     if (not done_file_time or newest_file > done_file_time or sync or artifact == "none"):
         lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "-uDN", "-bk", "--binpkg-respect-use=y", 
-            "system", "nano", "gentoolkit", "repoman", 
+            "system", "nano", "gentoolkit", "pkgdev", 
             "strace", "vim", "tcpdump", "netkit-telnetd"])
         if os.path.isfile(os.path.join(gentoo_dir, "build.sh")):
             lower_exec(gentoo_dir, cache_dir, portage_dir, ["/build.sh"])
@@ -254,7 +254,7 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
         else: outfile = "%s-%s.squashfs" % (artifact, arch)
 
     if outfile == "-":
-        subprocess.check_call(sudo(["systemd-nspawn", "-M", CONTAINER_NAME, "-q", "-D", upper_dir, "--network-veth", "-b"]))
+        subprocess.check_call(sudo(["systemd-nspawn", "--suppress-sync=true", "-M", CONTAINER_NAME, "-q", "-D", upper_dir, "--network-veth", "-b"]))
         return None
     #else
     if not os.path.isfile(outfile) or os.stat(genpack_packages_file).st_mtime > os.stat(outfile).st_mtime:
@@ -313,7 +313,7 @@ def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_js
         print("Processing package %s..." % pkg_wo_ver)
         newest_pkg_file = max(newest_pkg_file, sync_files(package_dir, upper_dir, r"^CONTENTS(\.|$)"))
         if os.path.isfile(os.path.join(upper_dir, "pkgbuild")):
-            subprocess.check_call(sudo(["systemd-nspawn", "-q", "-M", CONTAINER_NAME, "-D", gentoo_dir, "--overlay=+/:%s:/" % os.path.abspath(upper_dir), 
+            subprocess.check_call(sudo(["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", gentoo_dir, "--overlay=+/:%s:/" % os.path.abspath(upper_dir), 
                 "--bind=%s:/var/cache" % os.path.abspath(cache_dir),
                 "-E", "PROFILE=%s" % profile, "-E", "ARTIFACT=%s" % artifact, 
                 "--capability=CAP_MKNOD",
@@ -332,7 +332,7 @@ def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_js
     newest_artifact_file = max(newest_pkg_file, sync_files(artifact_dir, upper_dir))
     if os.path.isfile(os.path.join(upper_dir, "build")):
         print("Building artifact...")
-        subprocess.check_call(sudo(["systemd-nspawn", "-q", "-M", CONTAINER_NAME, "-D", gentoo_dir, 
+        subprocess.check_call(sudo(["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", gentoo_dir, 
             "--overlay=+/:%s:/" % os.path.abspath(upper_dir), 
             "--bind=%s:/var/cache" % os.path.abspath(cache_dir),
             "/build" ]))
@@ -521,7 +521,7 @@ def copy(gentoo_dir, upper_dir, files):
     if rsync.wait() != 0: raise BaseException("rsync returned error code.")
 
 def copyup_gcc_libs(gentoo_dir, upper_dir):
-    subprocess.check_call(sudo(["systemd-nspawn", "-q", "-M", CONTAINER_NAME, "-D", gentoo_dir, "--overlay=+/:%s:/" % os.path.abspath(upper_dir), "sh", "-c", "touch -h `gcc --print-file-name=`/*.so.* && ldconfig" ]))
+    subprocess.check_call(sudo(["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", gentoo_dir, "--overlay=+/:%s:/" % os.path.abspath(upper_dir), "sh", "-c", "touch -h `gcc --print-file-name=`/*.so.* && ldconfig" ]))
 
 def remove_root_password(root_dir):
     subprocess.check_call(sudo(["sed", "-i", r"s/^root:\*:/root::/", os.path.join(root_dir, "etc/shadow") ]))
@@ -537,7 +537,7 @@ def set_locale_to_envvar(root_dir):
 
 def enable_services(root_dir, services):
     if not isinstance(services, list): services = [services]
-    subprocess.check_call(sudo(["systemd-nspawn", "-q", "-M", CONTAINER_NAME, "-D", root_dir, "systemctl", "enable"] + services))
+    subprocess.check_call(sudo(["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", root_dir, "systemctl", "enable"] + services))
 
 def pack(upper_dir, outfile, compression="gzip"):
     cmdline = ["mksquashfs", upper_dir, outfile, "-noappend", "-no-exports"]
