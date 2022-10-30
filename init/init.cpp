@@ -1105,8 +1105,8 @@ static std::filesystem::path do_init(bool transient)
           std::cout << "Reusable swapfile found and enabled." << std::endl;
         } else {
           auto free_disk_space = init::lib::get_free_disk_space(mnt_swap);
-          if (free_disk_space >= 2L * 1024 * 1024 * 1024) {
-            uint64_t swap_size = 4L * 1024 * 1024 * 1024;
+          if (free_disk_space >= 2ULL * 1024 * 1024 * 1024) {
+            uint64_t swap_size = 4ULL * 1024 * 1024 * 1024;
             while (swap_size * 2 > free_disk_space) { swap_size /= 2;}          
             std::cout << "Creating swapfile..." << std::flush;
             int fd = creat(swapfile.c_str(), S_IRUSR | S_IWUSR);

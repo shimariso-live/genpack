@@ -261,7 +261,7 @@ std::list<BlockDevice> lsblk(const std::optional<std::filesystem::path>& device 
                 splitted[3] != ""? std::make_optional(splitted[3]) : std::nullopt,
                 std::stoi(splitted[4]) > 0,
                 splitted[5] != ""? std::make_optional(splitted[5]) : std::nullopt,
-                std::stoul(splitted[6]),
+                std::stoull(splitted[6]),
                 splitted[7],
                 (uint16_t)std::stoi(splitted[8])
             });
@@ -278,8 +278,8 @@ std::list<BlockDevice> lsblk(const std::optional<std::filesystem::path>& device 
     return devices;
 }
 
-const uint64_t MIN_DISK_SIZE = 4L * 1024 * 1024 * 1024;
-const uint64_t MIN_DISK_SIZE_TO_HAVE_DATA_PARTITION = 6L * 1024 * 1024 * 1024;
+const uint64_t MIN_DISK_SIZE = 4ULL * 1024 * 1024 * 1024;
+const uint64_t MIN_DISK_SIZE_TO_HAVE_DATA_PARTITION = 6ULL * 1024 * 1024 * 1024;
 
 std::string size_str(uint64_t size)
 {
@@ -435,13 +435,21 @@ void copy_system_cfg_ini(const std::optional<std::filesystem::path>& system_cfg,
 
 bool install_bootloader(const std::filesystem::path& disk, const std::filesystem::path& boot_partition_dir, bool bios_compatible = true)
 {
-    auto efi_boot = boot_partition_dir / "efi/boot";
-    std::filesystem::create_directories(efi_boot);
-    // install EFI bootloader
-    if (exec("grub-mkimage", {"-p", "/boot/grub", "-o", (efi_boot / "bootx64.efi").string(), "-O", "x86_64-efi", 
-        "xfs","btrfs","fat","part_gpt","part_msdos","normal","linux","echo","all_video","test","multiboot","multiboot2","search","sleep","iso9660","gzio",
-        "lvm","chain","configfile","cpuid","minicmd","gfxterm_background","png","font","terminal","squash4","serial","loopback","videoinfo","videotest",
-        "blocklist","probe","efi_gop","efi_uga", "keystatus"}) != 0) return false;
+    const bool has_efi_grub = is_dir("/usr/lib/grub/x86_64-efi");
+    if (!has_efi_grub && !bios_compatible) {
+        std::cout << "Disk is not compatible with this system." << std::endl;
+        return false;
+    }
+    if (has_efi_grub) {
+        auto efi_boot = boot_partition_dir / "efi/boot";
+        std::filesystem::create_directories(efi_boot);
+        // install EFI bootloader
+        if (exec("grub-mkimage", {"-p", "/boot/grub", "-o", (efi_boot / "bootx64.efi").string(), "-O", "x86_64-efi", 
+            "xfs","btrfs","fat","part_gpt","part_msdos","normal","linux","echo","all_video","test","multiboot","multiboot2","search","sleep","iso9660","gzio",
+            "lvm","chain","configfile","cpuid","minicmd","gfxterm_background","png","font","terminal","squash4","serial","loopback","videoinfo","videotest",
+            "blocklist","probe","efi_gop","efi_uga", "keystatus"}) != 0) return false;
+        //else
+    }
     if (bios_compatible) {
         // install BIOS bootloader
         if (exec("grub-install", {"--target=i386-pc", "--recheck", std::string("--boot-directory=") + (boot_partition_dir / "boot").string(),

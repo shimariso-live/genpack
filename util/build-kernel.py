@@ -17,7 +17,8 @@ def main(kernelpkg,config,nocache=False,menuconfig=False):
     subprocess.check_call(["emerge", "-u", "-bk", "--binpkg-respect-use=y", "genkernel", "eclean-kernel", "linux-sources", kernelpkg], 
         env={"PATH":os.environ["PATH"],"USE":"symlink","ACCEPT_LICENSE":"linux-fw-redistributable no-source-code"})
 
-    genkernel_cmdline = ["genkernel", "--symlink", "--no-mountboot", "--no-bootloader", "--kernel-config=%s" % config, 
+    genkernel_cmdline = ["genkernel", "--symlink", "--no-mountboot", "--no-bootloader",
+        "--kernel-config=%s" % config, 
         "--kernel-config-filename=%s" % os.path.basename(GENERATED_KERNEL_CONFIG), 
         "--kernel-localversion=UNSET", "--no-keymap", "--kerncache=%s" % KERNCACHE]
     

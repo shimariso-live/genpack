@@ -27,9 +27,11 @@ def url_readlines(url):
 def get_latest_stage3_tarball_url(base,arch):
     if not base.endswith('/'): base += '/'
     _arch = arch
-    if _arch == "x86_64": _arch = "amd64"
-    elif _arch == "aarch64": _arch = "arm64"
-    for line in url_readlines(base + "releases/" + _arch + "/autobuilds/latest-stage3-" + _arch + "-systemd.txt"):
+    _arch2 = arch
+    if _arch == "x86_64": _arch = _arch2 = "amd64"
+    elif _arch == "i686": _arch = "x86"
+    elif _arch == "aarch64": _arch = _arch2 = "arm64"
+    for line in url_readlines(base + "releases/" + _arch + "/autobuilds/latest-stage3-" + _arch2 + "-systemd.txt"):
         line = re.sub(r'#.*$', "", line.strip())
         if line == "": continue
         #else
@@ -189,7 +191,9 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     newest_file = link_files(os.path.join(".", "profiles", profile), gentoo_dir)
     # remove irrelevant arch dependent settings
     for i in glob.glob(os.path.join(gentoo_dir, "etc/portage/package.*/arch-*")):
-        if not i.endswith("-" + arch): os.unlink(i)
+        if not i.endswith("-" + arch) and os.path.isfile(i): os.unlink(i)
+    for i in glob.glob(os.path.join(gentoo_dir, "etc/portage/sets/*.%s" % arch)):
+        if os.path.isfile(i): os.rename(i,  i[:i.rfind(".")])
 
     # move files under /var/cache
     os.makedirs(cache_dir, exist_ok=True)
