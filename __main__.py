@@ -267,7 +267,7 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     return outfile
 
 def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_json):
-    artifact_pkgs = ["gentoo-systemd-integration", "util-linux","timezone-data","bash","openssh", "coreutils", "procps", "net-tools", 
+    artifact_pkgs = ["gentoo-systemd-integration", "util-linux","timezone-data","bash","gzip","openssh", "coreutils", "procps", "net-tools", 
         "iproute2", "iputils", "dbus", "python", "rsync", "tcpdump", "ca-certificates","e2fsprogs"]
     if build_json and "packages" in build_json:
         if not isinstance(build_json["packages"], list): raise Exception("packages must be list")
@@ -339,6 +339,7 @@ def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_js
         subprocess.check_call(sudo(["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", gentoo_dir, 
             "--overlay=+/:%s:/" % os.path.abspath(upper_dir), 
             "--bind=%s:/var/cache" % os.path.abspath(cache_dir),
+            "-E", "PROFILE=%s" % profile, "-E", "ARTIFACT=%s" % artifact, 
             "/build" ]))
     else:
         print("Artifact build script not found.")
@@ -355,7 +356,7 @@ def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_js
     with open(os.path.join(genpack_metadata_dir, "packages"), "w") as f:
         for pkg in pkgs:
             f.write(pkg + '\n')
-    subprocess.check_call(sudo(["chown", "-R", "root.root", genpack_metadata_dir]))
+    subprocess.check_call(sudo(["chown", "-R", "root:root", genpack_metadata_dir]))
     subprocess.check_call(sudo(["chmod", "755", genpack_metadata_dir]))
 
 def strip_ver(pkgname):
