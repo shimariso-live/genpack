@@ -1,4 +1,5 @@
 #include <unistd.h>
+#include <string.h>
 #include <wait.h>
 #include <glob.h>
 #include <fcntl.h>
@@ -772,4 +773,4 @@ int main(int argc, char* argv[])
     return 1;
 }
 
-// g++ -std=c++2a -o genpack-install genpack-install.cpp -lmount -lblkid
+// g++ -std=c++23 -o genpack-install genpack-install.cpp -lmount -lblkid
