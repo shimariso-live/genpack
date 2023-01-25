@@ -1,5 +1,6 @@
 #include <fcntl.h>
 #include <unistd.h>
+#include <string.h>
 #include <sys/utsname.h>
 #include <sys/reboot.h>
 #include <sys/wait.h>
