@@ -76,9 +76,12 @@ def link_files(srcdir, dstdir):
     for f in files_to_link:
         src = os.path.join(srcdir, f)
         dst = os.path.join(dstdir, f)
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        if os.path.isfile(dst): os.unlink(dst)
-        os.link(src, dst)
+        dst_dir = os.path.dirname(dst)
+        if os.path.exists(dst_dir):
+            if not os.path.isdir(dst_dir): raise Exception("%s should be a directory" % dst_dir)
+        else:
+            subprocess.check_call(sudo(["mkdir", "-p", dst_dir]))
+        subprocess.check_call(sudo(["ln", "-f", src, dst]))
     
     return newest_file
 
@@ -206,12 +209,12 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     put_resource_file(gentoo_dir, init, "init.cpp")
     put_resource_file(gentoo_dir, init, "init.h")
     put_resource_file(gentoo_dir, util, "build-kernel.py", "usr/local/sbin/build-kernel", True)
+    put_resource_file(gentoo_dir, util, "recursive-touch.py", "usr/local/bin/recursive-touch", True)
     put_resource_file(gentoo_dir, util, "with-mysql.py", "usr/local/sbin/with-mysql", True)
     put_resource_file(gentoo_dir, util, "download.py", "usr/local/bin/download", True)
     put_resource_file(gentoo_dir, util, "install-system-image", "usr/sbin/install-system-image", True)
     put_resource_file(gentoo_dir, util, "expand-rw-layer", "usr/sbin/expand-rw-layer", True)
     put_resource_file(gentoo_dir, util, "do-with-lvm-snapshot", "usr/sbin/do-with-lvm-snapshot", True)
-    put_resource_file(gentoo_dir, util, "rpmbootstrap.py", "usr/sbin/rpmbootstrap", True)
     put_resource_file(gentoo_dir, util, "genbootstrap.py", "usr/sbin/genbootstrap", True)
     put_resource_file(gentoo_dir, util, "genpack-install.cpp", "usr/src/genpack-install.cpp", True)
 
@@ -267,6 +270,16 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     return outfile
 
 def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_json):
+    os.makedirs(os.path.dirname(upper_dir), exist_ok=True)
+    subprocess.check_call(sudo(["mkdir", upper_dir]))
+    if os.path.isfile(os.path.join(gentoo_dir, "prepare-artifact.sh")):
+        print("Preparing for artifact...")
+        subprocess.check_call(sudo(["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", gentoo_dir, 
+            "--overlay=+/:%s:/" % os.path.abspath(upper_dir), 
+            "--bind=%s:/var/cache" % os.path.abspath(cache_dir),
+            "-E", "PROFILE=%s" % profile, "-E", "ARTIFACT=%s" % artifact, 
+            "/prepare-artifact.sh" ]))
+
     artifact_pkgs = ["gentoo-systemd-integration", "util-linux","timezone-data","bash","gzip","openssh", "coreutils", "procps", "net-tools", 
         "iproute2", "iputils", "dbus", "python", "rsync", "tcpdump", "ca-certificates","e2fsprogs"]
     if build_json and "packages" in build_json:
@@ -297,8 +310,6 @@ def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_js
         #else
         files += build_json["files"]
 
-    os.makedirs(os.path.dirname(upper_dir), exist_ok=True)
-    subprocess.check_call(sudo(["mkdir", upper_dir]))
     print("Copying files to artifact dir...")
     copy(gentoo_dir, upper_dir, files)
     copyup_gcc_libs(gentoo_dir, upper_dir)
