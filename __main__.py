@@ -321,7 +321,7 @@ def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_js
     # per-package setup
     newest_pkg_file = 0
     for pkg in pkgs:
-        pkg_wo_ver = strip_ver(pkg)
+        pkg_wo_ver = pkg if pkg[0] == '@' else strip_ver(pkg)
         package_dir = os.path.join(packages_dir, pkg_wo_ver)
         if not os.path.isdir(package_dir): continue
         #else
@@ -366,7 +366,7 @@ def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_js
         f.write(artifact)
     with open(os.path.join(genpack_metadata_dir, "packages"), "w") as f:
         for pkg in pkgs:
-            f.write(pkg + '\n')
+            if pkg[0] != '@': f.write(pkg + '\n')
     subprocess.check_call(sudo(["chown", "-R", "root:root", genpack_metadata_dir]))
     subprocess.check_call(sudo(["chmod", "755", genpack_metadata_dir]))
 
@@ -451,6 +451,7 @@ def scan_pkg_dep(gentoo_dir, pkg_map, pkgnames, pkgs = None):
     if pkgs is None: pkgs = set()
     for pkgname in pkgnames:
         if pkgname[0] == '@':
+            pkgs.add(pkgname)
             scan_pkg_dep(gentoo_dir, pkg_map, get_package_set(gentoo_dir, pkgname[1:]), pkgs)
             continue
         optional = False
@@ -491,6 +492,7 @@ def is_path_excluded(path):
 def process_pkgs(gentoo_dir, packages_dir, pkgs):
     files = []
     for pkg in pkgs:
+        if pkg[0] == '@': continue
         contents_file = os.path.join(gentoo_dir, "var/db/pkg" , pkg, "CONTENTS")
         overridden_contents_file = os.path.join(packages_dir, strip_ver(pkg), "CONTENTS")
         if os.path.isfile(os.path.join(overridden_contents_file)):
