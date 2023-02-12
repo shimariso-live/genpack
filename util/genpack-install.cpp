@@ -137,8 +137,8 @@ void check_system_image(const std::filesystem::path& system_image)
     std::filesystem::path tempdir_path(tempdir.get());
     const auto genpack_dir = tempdir_path / ".genpack";
     if (!std::filesystem::is_directory(genpack_dir)) throw std::runtime_error("System image file doesn't contain .genpack directory");
-    if (!std::filesystem::exists(tempdir_path / "/boot/kernel")) throw std::runtime_error("System image file doesn't contain kernel image");
-    if (!std::filesystem::exists(tempdir_path / "/boot/initramfs")) throw std::runtime_error("System image file doesn't contain initramfs");
+    if (!std::filesystem::exists(tempdir_path / "boot/kernel")) throw std::runtime_error("System image file doesn't contain kernel image");
+    if (!std::filesystem::exists(tempdir_path / "boot/initramfs")) throw std::runtime_error("System image file doesn't contain initramfs");
     //else
     auto print_file = [&genpack_dir](const std::string& filename) {
         std::ifstream i(genpack_dir / filename);
