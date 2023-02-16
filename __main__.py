@@ -210,12 +210,12 @@ def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
     put_resource_file(gentoo_dir, init, "init.h")
     put_resource_file(gentoo_dir, util, "build-kernel.py", "usr/local/sbin/build-kernel", True)
     put_resource_file(gentoo_dir, util, "recursive-touch.py", "usr/local/bin/recursive-touch", True)
+    put_resource_file(gentoo_dir, util, "overlay_init.py", "usr/local/bin/overlay-init", True)
     put_resource_file(gentoo_dir, util, "with-mysql.py", "usr/local/sbin/with-mysql", True)
     put_resource_file(gentoo_dir, util, "download.py", "usr/local/bin/download", True)
     put_resource_file(gentoo_dir, util, "install-system-image", "usr/sbin/install-system-image", True)
     put_resource_file(gentoo_dir, util, "expand-rw-layer", "usr/sbin/expand-rw-layer", True)
     put_resource_file(gentoo_dir, util, "do-with-lvm-snapshot", "usr/sbin/do-with-lvm-snapshot", True)
-    put_resource_file(gentoo_dir, util, "genbootstrap.py", "usr/sbin/genbootstrap", True)
     put_resource_file(gentoo_dir, util, "genpack-install.cpp", "usr/src/genpack-install.cpp", True)
 
     if sync: lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "--sync"])
