@@ -1,5 +1,6 @@
 #!/usr/bin/python
 import os,sys,ctypes,ctypes.util,configparser,site,shutil,subprocess,glob,time,signal
+from pathlib import Path
 from importlib import machinery
 from inspect import signature
 
@@ -75,26 +76,11 @@ def move_mount(old, new):
 def umount(mountpoint):
     return libc.umount(mountpoint.encode())
 
-def start_udevd():
-    pid = os.fork()
-    if pid == 0:
-        os._exit(os.execl("/lib/systemd/systemd-udevd", "/lib/systemd/systemd-udevd"))
-    #else
-    for i in range(0,3):
-        if subprocess.call(["/bin/udevadm", "control", "--ping"]) == 0: break
-        #else
-        time.sleep(1)
-
-    if subprocess.call(["/bin/udevadm", "trigger", "--type=all", "--action=add", 
-            "--prioritized-subsystem=module,block,tpmrm,net,tty,input"]) != 0:
-        print("udevadm trigger failed")
-        time.sleep(1)
-    return pid
-
-def stop_udevd(pid):
-    subprocess.call(["/bin/udevadm", "settle"])
-    os.kill(pid, signal.SIGTERM)
-    os.waitpid(pid, 0)
+def coldplug_modules():
+    for path in Path("/sys/devices").rglob("modalias"):
+        with open(path) as f:
+            modalias = f.read().strip()
+        subprocess.call(["/sbin/modprobe", "-q", modalias])
 
 def copytree_if_exists(srcdir, dstdir):
     if not os.path.isdir(srcdir): return False
