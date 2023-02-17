@@ -1,9 +1,10 @@
 #!/usr/bin/python
-import os,sys,ctypes,ctypes.util,configparser,site,shutil,subprocess,glob,time,signal
+import os,sys,ctypes,ctypes.util,configparser,shutil,subprocess,glob,time
 from pathlib import Path
 from importlib import machinery
 from inspect import signature
 
+# libc functions
 libc = ctypes.CDLL(ctypes.util.find_library('c'), use_errno=True)
 libc.reboot.argtypes = (ctypes.c_int,)
 RB_HALT_SYSTEM = 0xcdef0123
@@ -11,20 +12,11 @@ libc.mount.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes
 MS_MOVE = 0x2000
 MS_RELATIME = (1<<21)
 libc.umount.argtypes = (ctypes.c_char_p,)
-
 libc.pivot_root.argtypes = (ctypes.c_char_p, ctypes.c_char_p)
 
 def _exception_handler(exctype, value, traceback):
     print(value)
     rst = libc.reboot(RB_HALT_SYSTEM)
-    print(rst)
-
-def halt_system_on_error():
-    sys.excepthook = _exception_handler
-
-def ensure_pid_is_1():
-    if os.getpid() != 1:
-        raise Exception("PID must be 1")
 
 def ensure_run_mounted():
     if os.path.ismount("/run"): return
@@ -60,14 +52,6 @@ def mount_overlayfs(lowerdir,upperdir,workdir,target):
         raise Exception("Overlay filesystem(%s) counldn't be mounted on %s. errno=%d" 
             % (mountopts,target,ctypes.get_errno()))
 
-def mount_fallback_to_tmpfs(source, mountpoint):
-    os.makedirs(mountpoint,exist_ok=True)
-    if source is not None and subprocess.call(["mount", source, mountpoint]) == 0:
-        return True
-    #else
-    mount_tmpfs(mountpoint)
-    return False
-
 def move_mount(old, new):
     os.makedirs(new,exist_ok=True)
     if libc.mount(old.encode(), new.encode(), None, MS_MOVE, None) < 0:
@@ -76,11 +60,11 @@ def move_mount(old, new):
 def umount(mountpoint):
     return libc.umount(mountpoint.encode())
 
-def coldplug_modules():
-    for path in Path("/sys/devices").rglob("modalias"):
+def coldplug_modules(root):
+    for path in Path(os.path.join(root, "sys/devices")).rglob("modalias"):
         with open(path) as f:
             modalias = f.read().strip()
-        subprocess.call(["/sbin/modprobe", "-q", modalias])
+        subprocess.call(["/bin/chroot", root, "/sbin/modprobe", "-q", modalias])
 
 def copytree_if_exists(srcdir, dstdir):
     if not os.path.isdir(srcdir): return False
@@ -119,6 +103,64 @@ def pivot_root(new_root, put_old):
     if libc.pivot_root(new_root.encode(), put_old.encode()) < 0:
         raise Exception("pivot_root(%s,%s) failed. errno=%d" % (new_root,put_old,ctypes.get_errno()))
 
+def main(data_partition=None):
+    RW="/run/.rw"
+    BOOT="/run/.boot"
+    NEWROOT="/run/.newroot"
+    SHUTDOWN="/run/.shutdown"
+
+    has_boot_partition = os.path.ismount(BOOT)
+    if not has_boot_partition and data_partition is None: 
+        data_partition = "/dev/vdb" # in case directly invoked by kernel
+
+    ensure_run_mounted()
+    ensure_sys_mounted()
+    ensure_proc_mounted()
+
+    os.mkdir(RW)
+    if data_partition is not None and subprocess.call(["mount", data_partition, RW]) == 0:
+        print("Data partition mounted.")
+    else:
+        print("Data partition is not mounted. Proceeding with transient R/W layer.")
+        mount_tmpfs(RW)
+
+    mount_overlayfs("/", os.path.join(RW, "root"), os.path.join(RW, "work"), NEWROOT)
+    print("Root filesystem mounted.")
+
+    new_run = os.path.join(NEWROOT, "run")
+    mount_tmpfs(new_run)
+    move_mount(RW, os.path.join(new_run, "initramfs/rw"))
+    if has_boot_partition:
+        new_boot = os.path.join(new_run, "initramfs/boot")
+        move_mount(BOOT, new_boot)
+
+    if copytree_if_exists(SHUTDOWN, os.path.join(new_run, "initramfs")):
+        print("Shutdown environment is ready.")
+
+    move_mount("/dev", os.path.join(NEWROOT, "dev"))
+    move_mount("/sys", os.path.join(NEWROOT, "sys"))
+    move_mount("/proc", os.path.join(NEWROOT, "proc"))
+
+    if has_boot_partition: # no boot partition == paravirt
+        print("Loading device drivers...")
+        coldplug_modules(NEWROOT) # invoke modprobe under newroot considering /etc/modprobe.d customization
+
+    try:
+        print("Configuring system...")
+        inifile = load_inifile(os.path.join(new_boot, "system.ini")) if has_boot_partition else {}
+        execute_configuration_scripts(NEWROOT, inifile)
+    except Exception as e:
+        print(e)
+
+    print("Starting actual /sbin/init...")
+    os.chdir(NEWROOT)
+    pivot_root(".", "run/initramfs/ro")
+    os.chroot(".")
+    umount("/run/initramfs/ro/run")
+    os.execl("/sbin/init", "/sbin/init")
+
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "install":
-        shutil.copy(__file__, os.path.join(os.path.realpath(site.getsitepackages()[0]), "overlay_init.py"))
+    if os.getpid() != 1: raise Exception("PID must be 1")
+    data_partition = sys.argv[1] if len(sys.argv) > 1 else None
+    sys.excepthook = _exception_handler
+    main(data_partition)
