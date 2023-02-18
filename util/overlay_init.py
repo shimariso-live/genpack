@@ -1,5 +1,5 @@
 #!/usr/bin/python
-import os,sys,ctypes,ctypes.util,configparser,shutil,subprocess,glob,time
+import os,sys,ctypes,ctypes.util,configparser,shutil,subprocess,glob,time,logging
 from pathlib import Path
 from importlib import machinery
 from inspect import signature
@@ -125,7 +125,10 @@ def main(data_partition=None):
         mount_tmpfs(RW)
 
     mount_overlayfs("/", os.path.join(RW, "root"), os.path.join(RW, "work"), NEWROOT)
-    print("Root filesystem mounted.")
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(filename)s:%(lineno)d %(message)s", 
+        handlers=[logging.FileHandler(os.path.join(NEWROOT, "var/log/overlay-init.log"), mode='w'), logging.StreamHandler()])
+    logging.info("Root filesystem mounted.")
 
     new_run = os.path.join(NEWROOT, "run")
     mount_tmpfs(new_run)
@@ -135,24 +138,24 @@ def main(data_partition=None):
         move_mount(BOOT, new_boot)
 
     if copytree_if_exists(SHUTDOWN, os.path.join(new_run, "initramfs")):
-        print("Shutdown environment is ready.")
+        logging.info("Shutdown environment is ready.")
 
     move_mount("/dev", os.path.join(NEWROOT, "dev"))
     move_mount("/sys", os.path.join(NEWROOT, "sys"))
     move_mount("/proc", os.path.join(NEWROOT, "proc"))
 
     if has_boot_partition: # no boot partition == paravirt
-        print("Loading device drivers...")
+        logging.info("Loading device drivers...")
         coldplug_modules(NEWROOT) # invoke modprobe under newroot considering /etc/modprobe.d customization
 
     try:
-        print("Configuring system...")
+        logging.info("Configuring system...")
         inifile = load_inifile(os.path.join(new_boot, "system.ini")) if has_boot_partition else {}
         execute_configuration_scripts(NEWROOT, inifile)
     except Exception as e:
-        print(e)
+        logging.exception("Exception occured while configuring system")
 
-    print("Starting actual /sbin/init...")
+    logging.info("Starting actual /sbin/init...")
     os.chdir(NEWROOT)
     pivot_root(".", "run/initramfs/ro")
     os.chroot(".")
