@@ -64,7 +64,8 @@ def coldplug_modules(root):
     for path in Path(os.path.join(root, "sys/devices")).rglob("modalias"):
         with open(path) as f:
             modalias = f.read().strip()
-        subprocess.call(["/bin/chroot", root, "/sbin/modprobe", "-q", modalias])
+        if subprocess.call(["/bin/chroot", root, "/sbin/modprobe", "-q", modalias]) != 0:
+            logging.debug("Unable to load modalias %s" % modalias)
 
 def copytree_if_exists(srcdir, dstdir):
     if not os.path.isdir(srcdir): return False
@@ -81,7 +82,7 @@ def load_inifile(filename):
     return parser
 
 def execute_configuration_scripts(root, ini=None):
-    if ini is None: ini = {}
+    if ini is None: ini = configparser.ConfigParser()
     i = 0
     for py in glob.glob("/usr/share/overlay-init/*.py"):
         try:
@@ -89,14 +90,14 @@ def execute_configuration_scripts(root, ini=None):
             i += 1
             if not hasattr(mod, "configure"): continue
             #else
+            logging.debug("Executing configuration script %s..." % py)
             arglen = len(signature(mod.configure).parameters)
             if arglen == 2:
                 mod.configure(root, ini)
             elif arglen == 1:
                 mod.configure(root)
-        except Exception as e:
-            print("py: %s" % e)
-            time.sleep(3)
+        except Exception:
+            logging.exception("Exception in %s" % py)
 
 def pivot_root(new_root, put_old):
     os.makedirs(put_old,exist_ok=True)
@@ -126,8 +127,13 @@ def main(data_partition=None):
 
     mount_overlayfs("/", os.path.join(RW, "root"), os.path.join(RW, "work"), NEWROOT)
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(filename)s:%(lineno)d %(message)s", 
-        handlers=[logging.FileHandler(os.path.join(NEWROOT, "var/log/overlay-init.log"), mode='w'), logging.StreamHandler()])
+    inifile = load_inifile(os.path.join(BOOT, "system.ini")) if has_boot_partition else configparser.ConfigParser()
+    debug = inifile.getboolean("overlay-init", "debug", fallback=False)
+    logging.basicConfig(level=logging.DEBUG if debug else logging.INFO,
+        format="%(asctime)s %(levelname)s %(filename)s:%(lineno)d %(message)s", 
+        handlers=[logging.FileHandler(os.path.join(NEWROOT, "var/log/overlay-init.log"), mode='w'), logging.StreamHandler()],
+        force=True)
+    if debug: logging.info("Debug log enabled.")
     logging.info("Root filesystem mounted.")
 
     new_run = os.path.join(NEWROOT, "run")
@@ -150,7 +156,6 @@ def main(data_partition=None):
 
     try:
         logging.info("Configuring system...")
-        inifile = load_inifile(os.path.join(new_boot, "system.ini")) if has_boot_partition else {}
         execute_configuration_scripts(NEWROOT, inifile)
     except Exception as e:
         logging.exception("Exception occured while configuring system")
