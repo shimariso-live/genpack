@@ -1,5 +1,5 @@
 #!/usr/bin/python
-import os,sys,ctypes,ctypes.util,configparser,shutil,subprocess,glob,time,logging
+import os,sys,ctypes,ctypes.util,configparser,shutil,subprocess,glob,logging
 from pathlib import Path
 from importlib import machinery
 from inspect import signature
@@ -61,11 +61,21 @@ def umount(mountpoint):
     return libc.umount(mountpoint.encode())
 
 def coldplug_modules(root):
+    CHROOT="/bin/chroot"
+    MODPROBE="/sbin/modprobe"
+    modaliases = set()
     for path in Path(os.path.join(root, "sys/devices")).rglob("modalias"):
         with open(path) as f:
-            modalias = f.read().strip()
-        if subprocess.call(["/bin/chroot", root, "/sbin/modprobe", "-q", modalias]) != 0:
-            logging.debug("Unable to load modalias %s" % modalias)
+            modaliases.add(f.read().strip())
+
+    modprobe_query = subprocess.run([CHROOT, root, MODPROBE, "-a", "-q", "-R"] + list(modaliases), stdout=subprocess.PIPE, text=True)
+    modules = set()
+    for module_name in modprobe_query.stdout.strip().split():
+        modules.add(module_name)
+
+    logging.info("Loading modules: %s" % (",".join(modules)))
+    subprocess.call([CHROOT, root, MODPROBE, "-a", "-b"] + list(modules))
+    return True
 
 def copytree_if_exists(srcdir, dstdir):
     if not os.path.isdir(srcdir): return False
