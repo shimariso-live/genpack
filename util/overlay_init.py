@@ -114,6 +114,32 @@ def pivot_root(new_root, put_old):
     if libc.pivot_root(new_root.encode(), put_old.encode()) < 0:
         raise Exception("pivot_root(%s,%s) failed. errno=%d" % (new_root,put_old,ctypes.get_errno()))
 
+def read_qemu_fw_cfg(root):
+    by_name = os.path.join(root, "sys/firmware/qemu_fw_cfg/by_name")
+    ssh_public_key = os.path.join(by_name, "opt/ssh-public-key/raw")
+    if os.path.isfile(ssh_public_key):
+        logging.debug("SSH public key provided by VM host found")
+        root_ssh = os.path.join(root, "root/.ssh")
+        if os.path.isdir(root_ssh):
+            authorized_keys = os.path.join(root_ssh, "authorized_keys")
+            has_authorized_keys = False
+            if os.path.isfile(authorized_keys):
+                with open(authorized_keys) as f:
+                    if f.read().strip() != "": has_authorized_keys = True
+            if not has_authorized_keys:
+                shutil.copyfile(ssh_public_key, authorized_keys)
+                logging.info("SSH public key installed.")
+
+    ssh_host_keys = os.path.join(by_name, "opt/ssh-host-keys/raw")
+    if os.path.isfile(ssh_host_keys):
+        logging.debug("SSH host key provided by VM host found")
+        etc_ssh = os.path.join(root, "etc/ssh")
+        if os.path.isdir(etc_ssh) and len(glob.glob(os.path.join(etc_ssh, "ssh_host_*_key"))) == 0:
+            if subprocess.call(["/bin/tar", "xf", ssh_host_keys, "-k", "-C", etc_ssh]) == 0:
+                logging.info("SSH host keys installed.")
+            else:
+                logging.error("Error installing SSH host keys.")
+
 def main(data_partition=None):
     RW="/run/.rw"
     BOOT="/run/.boot"
@@ -164,11 +190,19 @@ def main(data_partition=None):
         logging.info("Loading device drivers...")
         coldplug_modules(NEWROOT) # invoke modprobe under newroot considering /etc/modprobe.d customization
 
-    try:
+    if os.path.isdir("/usr/share/overlay-init"):
         logging.info("Configuring system...")
-        execute_configuration_scripts(NEWROOT, inifile)
-    except Exception as e:
-        logging.exception("Exception occured while configuring system")
+        try:
+            execute_configuration_scripts(NEWROOT, inifile)
+        except Exception:
+            logging.exception("Exception occured while configuring system")
+    
+    if os.path.isdir(os.path.join(NEWROOT, "sys/firmware/qemu_fw_cfg")):
+        logging.info("Reading qemu_fw_cfg...")
+        try:
+            read_qemu_fw_cfg(NEWROOT)
+        except Exception:
+            logging.exception("Exception occured while reading qemu_fw_cfg")
 
     logging.info("Starting actual /sbin/init...")
     os.chdir(NEWROOT)
