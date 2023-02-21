@@ -94,6 +94,7 @@ def load_inifile(filename):
 def execute_configuration_scripts(root, ini=None):
     if ini is None: ini = configparser.ConfigParser()
     i = 0
+    sys.path.append("/usr/share/overlay-init")
     for py in glob.glob("/usr/share/overlay-init/*.py"):
         try:
             mod = machinery.SourceFileLoader("_confscript%d" % i, py).load_module()
