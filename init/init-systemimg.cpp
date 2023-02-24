@@ -239,6 +239,21 @@ static std::optional<std::filesystem::path> get_data_partition(const std::filesy
     return data_partition;
 }
 
+static bool is_fat_dirty(const std::filesystem::path device)
+{
+    auto fd = open(device.c_str(), O_RDONLY);
+    if (fd < 0) return false;
+    char buf[9] = "        ";
+    if (pread(fd, buf, 8, 0x52) != 8 || strcmp(buf, "FAT32   ") != 0) {
+        close(fd);
+        return false; // Unknown filesystem type
+    }
+    uint8_t flags;
+    auto dirty = pread(fd, &flags, 1, 0x41) == 1 && (flags & 1);
+    close(fd);
+    return dirty;
+}
+
 static void init()
 {
     std::filesystem::path banner("/banner.txt");
@@ -286,7 +301,9 @@ static void init()
     auto boot_partition_fstype = determine_fstype(*boot_partition_dev);
     if (!boot_partition_fstype) throw std::runtime_error("Unable to determine filesystem type of " + boot_partition_dev->string());
 
-    if ((*boot_partition_fstype) == "vfat") { // perform fsck before mounting
+    if ((*boot_partition_fstype) == "vfat" && is_fat_dirty(*boot_partition_dev)) { 
+        // perform fsck before mounting if FAT is dirty
+        std::cout << "Boot partition not properly unmounted last time. Fixing..." << std::endl;
         auto pid = fork();
         if (pid == 0) _exit(execl("/usr/sbin/fsck.fat", "/usr/sbin/fsck.fat", "-a", "-w", boot_partition_dev->c_str(), NULL));
         else if (pid > 0) wait(NULL);
@@ -349,6 +366,7 @@ static void init()
     chroot(".");
     chdir("/");
     recursive_move(cfd, "/run/.shutdown");
+    rmdir("/run/.shutdown/root"); // newroot mountpoint is not necessary in shutdown env
     close(cfd);
     if (execl("/sbin/overlay-init", "/sbin/overlay-init", data_partition? data_partition->c_str() : NULL, NULL) != 0) {
         throw std::runtime_error("Executing /sbin/overlay-init failed");
