@@ -146,6 +146,7 @@ def main(data_partition=None):
     BOOT="/run/.boot"
     NEWROOT="/run/.newroot"
     SHUTDOWN="/run/.shutdown"
+    SHELL="/bin/sh"
 
     has_boot_partition = os.path.ismount(BOOT)
     if not has_boot_partition and data_partition is None: 
@@ -159,10 +160,19 @@ def main(data_partition=None):
     if data_partition is not None and subprocess.call(["mount", data_partition, RW]) == 0:
         print("Data partition mounted.")
     else:
-        print("Data partition is not mounted. Proceeding with transient R/W layer.")
+        print("Data partition is not mounted. Proceeding with tmpfs.")
         mount_tmpfs(RW)
 
-    mount_overlayfs("/", os.path.join(RW, "root"), os.path.join(RW, "work"), NEWROOT)
+    overlay_upper = os.path.join(RW, "root")
+    overlay_work = os.path.join(RW, "work")
+
+    # for backward compatibility
+    overlay_upper_compat = os.path.join(RW, "rw/root")
+    if os.path.isdir(overlay_upper_compat) and not os.path.exists(overlay_upper):
+        subprocess.call(["/bin/mv", overlay_upper_compat, overlay_upper])
+
+    # mount new root filesystem
+    mount_overlayfs("/", overlay_upper, overlay_work, NEWROOT)
 
     inifile = load_inifile(os.path.join(BOOT, "system.ini")) if has_boot_partition else configparser.ConfigParser()
     debug = inifile.getboolean("overlay-init", "debug", fallback=False)
@@ -172,6 +182,9 @@ def main(data_partition=None):
         force=True)
     if debug: logging.info("Debug log enabled.")
     logging.info("Root filesystem mounted.")
+
+    shell = inifile.get("overlay-init", "shell", fallback=None)
+    if shell == "1": subprocess.call(SHELL)
 
     new_run = os.path.join(NEWROOT, "run")
     mount_tmpfs(new_run)
@@ -204,6 +217,8 @@ def main(data_partition=None):
             read_qemu_fw_cfg(NEWROOT)
         except Exception:
             logging.exception("Exception occured while reading qemu_fw_cfg")
+
+    if shell == "2": subprocess.call(SHELL)
 
     logging.info("Starting actual /sbin/init...")
     os.chdir(NEWROOT)
