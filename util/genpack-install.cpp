@@ -318,11 +318,12 @@ int print_installable_disks()
     return 0;
 }
 
-std::tuple<std::filesystem::path,std::optional<std::filesystem::path>,bool/*bios_compatibel*/> create_partitions(const BlockDevice& disk, bool data_partition = true)
+std::tuple<std::filesystem::path,std::optional<std::filesystem::path>,bool/*bios_compatibel*/> 
+    create_partitions(const BlockDevice& disk, bool data_partition = true, bool gpt = false)
 {
     auto disk_path = std::filesystem::path("/dev") / disk.name;
     std::vector<std::string> parted_args = {"--script", disk_path.string()};
-    bool bios_compatible = (disk.size <= 2199023255552L/*2TiB*/ && disk.log_sec == 512);
+    bool bios_compatible = !gpt && (disk.size <= 2199023255552L/*2TiB*/ && disk.log_sec == 512);
     parted_args.push_back(bios_compatible? "mklabel msdos" : "mklabel gpt");
     if (data_partition) {
         parted_args.push_back("mkpart primary fat32 1MiB 4GiB");
@@ -476,15 +477,23 @@ bool install_bootloader(const std::filesystem::path& disk, const std::filesystem
     return true;
 }
 
-int install_to_disk(const std::filesystem::path& disk, const std::optional<std::filesystem::path>& _system_image, bool data_partition = true, 
-    const std::optional<std::filesystem::path>& system_cfg = std::nullopt, const std::optional<std::filesystem::path>& system_ini = std::nullopt,
-    const std::optional<std::string>& label = std::nullopt, bool yes = false)
+struct InstallOptions {
+    const std::optional<std::filesystem::path>& system_image = installed_system_image;
+    const bool data_partition = true;
+    const std::optional<std::filesystem::path>& system_cfg = std::nullopt;
+    const std::optional<std::filesystem::path>& system_ini = std::nullopt;
+    const std::optional<std::string>& label = std::nullopt;
+    const bool yes = false;
+    const bool gpt = false;
+};
+
+int install_to_disk(const std::filesystem::path& disk, InstallOptions options = {})
 {
     if (disk == "list") return print_installable_disks();
 
     //else
-    auto system_image = _system_image? _system_image.value() : installed_system_image;
-    if (!_system_image) {
+    auto system_image = options.system_image.value_or(installed_system_image);
+    if (!options.system_image) {
         std::cerr << "System file image not specified. assuming " << system_image << "." << std::endl;
     }
 
@@ -508,6 +517,7 @@ int install_to_disk(const std::filesystem::path& disk, const std::optional<std::
     if (disk_info.pkname) throw std::runtime_error(disk.string() + " belongs to other block device");
     if (disk_info.size < MIN_DISK_SIZE) throw std::runtime_error(disk.string() + " is too small(At least " + size_str(MIN_DISK_SIZE) + " required)");
 
+    auto data_partition = options.data_partition;
     if (data_partition && disk_info.size < MIN_DISK_SIZE_TO_HAVE_DATA_PARTITION) {
         std::cout << "Disk size is not large enough to have data partition.  Applying --no-data-partition." << std::endl;
         data_partition = false;
@@ -518,7 +528,7 @@ int install_to_disk(const std::filesystem::path& disk, const std::optional<std::
     std::cout << "Disk size: " << size_str(disk_info.size) << std::endl;
     std::cout << "Logical sector size: " << disk_info.log_sec << " bytes" << std::endl;
 
-    if (!yes) {
+    if (!options.yes) {
         std::string sure;
         std::cout << "All data present on " << disk << " will be lost. Are you sure? (y/n):" << std::flush;
         std::cin >> sure;
@@ -530,7 +540,7 @@ int install_to_disk(const std::filesystem::path& disk, const std::optional<std::
     std::cout << "Looks OK." << std::endl;
 
     std::cout << "Creating partitions..." << std::flush;
-    auto partitions = create_partitions(disk_info, data_partition);
+    auto partitions = create_partitions(disk_info, data_partition, options.gpt);
     std::cout << "Done." << std::endl;
 
     auto boot_partition_path = std::get<0>(partitions);
@@ -538,7 +548,7 @@ int install_to_disk(const std::filesystem::path& disk, const std::optional<std::
     auto bios_compatible = std::get<2>(partitions);
 
     std::cout << "Formatting boot partition with FAT32" << std::endl;
-    auto boot_partition_uuid = format_fat32(boot_partition_path, label);
+    auto boot_partition_uuid = format_fat32(boot_partition_path, options.label);
     if (data_partition_path) {
         std::cout << "Formatting data partition with BTRFS..." << std::flush;
         format_btrfs(data_partition_path.value(), std::string("data-") + boot_partition_uuid);
@@ -558,9 +568,9 @@ int install_to_disk(const std::filesystem::path& disk, const std::optional<std::
         }
         //else
         std::cout << "Done" << std::endl;
-        if (system_cfg || system_ini) {
+        if (options.system_cfg || options.system_ini) {
             std::cout << "Copying system config file..." << std::flush;
-            copy_system_cfg_ini(system_cfg, system_ini, tempdir_path);
+            copy_system_cfg_ini(options.system_cfg, options.system_ini, tempdir_path);
             std::cout << "Done" << std::endl;
         }
         std::cout << "Copying system image file..." << std::flush;
@@ -704,6 +714,7 @@ int usage(const std::string& progname)
     std::cout << ' ' << progname << ' ' << "--disk=<iso image file> --cdrom [--label=<label>] [system image file]" << std::endl;
     std::cout << "\noptions:" << std::endl;
     std::cout << ' ' << "-y : Don't ask questions" << std::endl;
+    std::cout << ' ' << "--gpt : Always use GPT instead of MBR" << std::endl;
     std::cout << ' ' << "--no-data-partition : Use entire disk as boot partition" << std::endl;
     std::cout << ' ' << "--label=<volume label> : Specify volume label of boot partition or iso9660 image" << std::endl;
     std::cout << ' ' << "--system-cfg=<system.cfg> : Install specified system.cfg file" << std::endl;
@@ -713,7 +724,7 @@ int usage(const std::string& progname)
 
 int main(int argc, char* argv[])
 {
-    int data_patririon = 1, cdrom = 0;
+    int data_partition = 1, cdrom = 0, gpt = 0;
     const struct option longopts[] = {
         //{   *name,           has_arg, *flag, val },
         {  "help", no_argument, 0, 'h'},
@@ -721,7 +732,8 @@ int main(int argc, char* argv[])
         {  "system-cfg", required_argument,     0, 'c' },
         {  "system-ini", required_argument,     0, 'i' },
         {  "label", required_argument,     0, 'l' },
-        { "no-data-partition",       no_argument, &data_patririon,  0  },
+        { "no-data-partition",       no_argument, &data_partition,  0  },
+        { "gpt", no_argument, &gpt, 1 }, 
         { "cdrom",       no_argument, &cdrom,  1  },
         {         0,                 0,     0,  0  }, // termination
     };
@@ -763,8 +775,9 @@ int main(int argc, char* argv[])
     try {
         if (geteuid() != 0) throw std::runtime_error("You must be root");
         return disk? (cdrom? create_iso9660_image(disk.value(), system_image, system_cfg, system_ini, label) 
-            : install_to_disk(disk.value(), system_image, data_patririon == 1, system_cfg, system_ini, label, yes)) 
-                : install_self(system_image.value(), system_cfg, system_ini);
+            : install_to_disk(disk.value(), { 
+                system_image: system_image, data_partition: data_partition == 1, system_cfg: system_cfg, system_ini:system_ini, label:label, yes:yes, gpt:gpt == 1
+            })) : install_self(system_image.value(), system_cfg, system_ini);
     }
     catch (const std::exception& ex) {
         std::cerr << ex.what() << std::endl;
