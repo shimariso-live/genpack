@@ -32,10 +32,16 @@ def do_dir(directory, dereference=False):
     for file in os.listdir(directory):
         do(os.path.join(directory, file), dereference)
 
+def resolve_symlink(symlink_path):
+    direct_target = os.readlink(symlink_path)
+    symlink_dir = os.path.dirname(symlink_path)
+    direct_target_abs = os.path.normpath(os.path.join(symlink_dir, direct_target))
+    return direct_target_abs
+
 def do(file, dereference=False):
     if file is None or file == "" or not os.path.exists(file) or file in files: return
     files.add(file)
-    if not dereference and os.path.islink(file): do(os.path.realpath(file), dereference)
+    if not dereference and os.path.islink(file): do(resolve_symlink(file), dereference)
     elif os.path.isfile(file):
         if iself(file): do_elf(file, dereference)
         elif isscript(file): do_script(file, dereference)
