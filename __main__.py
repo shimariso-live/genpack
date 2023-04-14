@@ -288,11 +288,13 @@ def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_js
         if not isinstance(build_json["packages"], list): raise Exception("packages must be list")
         #else
         artifact_pkgs += build_json["packages"]
+    
+    devel = build_json and "devel" in build_json and build_json["devel"] == True 
 
     pkg_map = collect_packages(gentoo_dir)
     pkgs = scan_pkg_dep(gentoo_dir, pkg_map, artifact_pkgs)
     packages_dir = os.path.join(".", "packages")
-    files = process_pkgs(gentoo_dir, packages_dir, pkgs)
+    files = process_pkgs(gentoo_dir, packages_dir, pkgs, devel)
     if os.path.isfile(os.path.join(gentoo_dir, "boot/kernel")): files.append("/boot/kernel")
     if os.path.isfile(os.path.join(gentoo_dir, "boot/initramfs")): files.append("/boot/initramfs")
     if os.path.isdir(os.path.join(gentoo_dir, "lib/modules")): files.append("/lib/modules/.")
@@ -479,10 +481,12 @@ def scan_pkg_dep(gentoo_dir, pkg_map, pkgnames, pkgs = None):
 
     return pkgs
 
-def is_path_excluded(path):
-    for expr in ["/run/","/var/run/","/var/lock/","/usr/share/man/","/usr/share/doc/","/usr/share/gtk-doc/","/usr/share/info/",
-        "/usr/include/","/var/cache/",re.compile(r'^/usr/lib/python[0-9\.]+?/test/'),re.compile(r'\.a$'),
-        re.compile(r"\/gschemas.compiled$"), re.compile(r"\/giomodule.cache$")]:
+def is_path_excluded(path, devel = False):
+    exclude_patterns = ["/run/","/var/run/","/var/lock/","/var/cache/"]
+    if not devel: exclude_patterns += ["/usr/share/man/","/usr/share/doc/","/usr/share/gtk-doc/","/usr/share/info/",
+        "/usr/include/",re.compile(r'^/usr/lib/python[0-9\.]+?/test/'),re.compile(r'\.a$'),
+        re.compile(r"\/gschemas.compiled$"), re.compile(r"\/giomodule.cache$")]
+    for expr in exclude_patterns:
         if isinstance(expr, re.Pattern):
             if re.search(expr, path): return True
         elif isinstance(expr, str):
@@ -491,7 +495,7 @@ def is_path_excluded(path):
             raise Exception("Unknown type")
     return False
 
-def process_pkgs(gentoo_dir, packages_dir, pkgs):
+def process_pkgs(gentoo_dir, packages_dir, pkgs, devel = False):
     files = []
     for pkg in pkgs:
         if pkg[0] == '@': continue
@@ -510,7 +514,7 @@ def process_pkgs(gentoo_dir, packages_dir, pkgs):
                     file_to_append = re.sub(r' [0-9a-f]+ [0-9]+$', "", line[4:])
                 elif line.startswith("sym "):
                     file_to_append = re.sub(r' -> .+$', "", line[4:])
-                if file_to_append is not None and not is_path_excluded(file_to_append): files.append(file_to_append)
+                if file_to_append is not None and not is_path_excluded(file_to_append, devel): files.append(file_to_append)
     return files
 
 def copy(gentoo_dir, upper_dir, files):
