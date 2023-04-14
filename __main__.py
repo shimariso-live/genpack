@@ -482,10 +482,10 @@ def scan_pkg_dep(gentoo_dir, pkg_map, pkgnames, pkgs = None):
     return pkgs
 
 def is_path_excluded(path, devel = False):
-    exclude_patterns = ["/run/","/var/run/","/var/lock/","/var/cache/"]
-    if not devel: exclude_patterns += ["/usr/share/man/","/usr/share/doc/","/usr/share/gtk-doc/","/usr/share/info/",
-        "/usr/include/",re.compile(r'^/usr/lib/python[0-9\.]+?/test/'),re.compile(r'\.a$'),
+    exclude_patterns = ["/run/","/var/run/","/var/lock/","/var/cache/",
         re.compile(r"\/gschemas.compiled$"), re.compile(r"\/giomodule.cache$")]
+    if not devel: exclude_patterns += ["/usr/share/man/","/usr/share/doc/","/usr/share/gtk-doc/","/usr/share/info/",
+        "/usr/include/",re.compile(r'^/usr/lib/python[0-9\.]+?/test/'),re.compile(r'\.a$')]
     for expr in exclude_patterns:
         if isinstance(expr, re.Pattern):
             if re.search(expr, path): return True
