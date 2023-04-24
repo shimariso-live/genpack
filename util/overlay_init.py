@@ -1,5 +1,5 @@
 #!/usr/bin/python
-import os,sys,ctypes,ctypes.util,configparser,shutil,subprocess,glob,logging
+import os,sys,ctypes,ctypes.util,configparser,shutil,subprocess,glob,logging,stat,fcntl
 from pathlib import Path
 from importlib import machinery
 from inspect import signature
@@ -141,30 +141,70 @@ def read_qemu_fw_cfg(root):
             else:
                 logging.error("Error installing SSH host keys.")
 
+def is_mountable_block_device(path):
+    if not os.path.exists(path): return False
+    file_stat = os.stat(path)
+    if not stat.S_ISBLK(file_stat.st_mode): return False
+    # check if size of block device > 1MiB
+    with open(path, 'rb') as device:
+        BLKGETSIZE64 = 0x80081272
+        size = fcntl.ioctl(device.fileno(), BLKGETSIZE64, b'\0' * 8)
+        if int.from_bytes(size, sys.byteorder) < 1024*1024: return False
+    return True
+
+def is_virtiofs_provided():
+    # for each /sys/bus/virtio/devices/virtio* directory(* contains number):
+    # check "device" file and if it contains "0x001a" (VIRTIO_ID_FS) return True
+    for path in Path("/sys/bus/virtio/devices").rglob("virtio*"):
+        device_file = os.path.join(path, "device")
+        if not os.path.isfile(device_file): continue
+        with open(device_file) as f:
+            if f.read().strip() == "0x001a": return True
+    return False
+
 def main(data_partition=None):
     RW="/run/.rw"
     BOOT="/run/.boot"
     NEWROOT="/run/.newroot"
     SHUTDOWN="/run/.shutdown"
     SHELL="/bin/sh"
+    DEFAULT_DATA_PARTITION="/dev/vdb"
 
     has_boot_partition = os.path.ismount(BOOT)
-    if not has_boot_partition and data_partition is None: 
-        data_partition = "/dev/vdb" # in case directly invoked by kernel
+    if not has_boot_partition and data_partition is None and is_mountable_block_device(DEFAULT_DATA_PARTITION): 
+        data_partition = DEFAULT_DATA_PARTITION # in case directly invoked by kernel
 
     ensure_run_mounted()
     ensure_sys_mounted()
     ensure_proc_mounted()
 
     os.mkdir(RW)
-    if data_partition is not None and subprocess.call(["mount", data_partition, RW]) == 0:
-        print("Data partition mounted.")
-    else:
+    if data_partition is not None and is_mountable_block_device(data_partition):
+        print("Trying to mount data partition %s..." % data_partition)
+        if subprocess.call(["mount", data_partition, RW]) == 0:
+            print("Data partition mounted.")
+        else:
+            print("Data partition mount failed.")
+
+    if not os.path.ismount(RW) and is_virtiofs_provided():
+        print("Trying to mount virtiofs.")
+        if subprocess.call(["mount", "-t", "virtiofs", "fs", RW]) == 0:
+            print("Virtiofs mounted.")
+        else:
+            print("Virtiofs mount failed.")
+    
+    if not os.path.ismount(RW):
         print("Data partition is not mounted. Proceeding with tmpfs.")
         mount_tmpfs(RW)
 
     overlay_upper = os.path.join(RW, "root")
     overlay_work = os.path.join(RW, "work")
+
+    # remove ld.so.cache
+    ld_so_cache = os.path.join(overlay_upper, "etc/ld.so.cache")
+    if os.path.exists(ld_so_cache):
+        os.remove(ld_so_cache)
+        print("Removed ld.so.cache")
 
     # for backward compatibility
     overlay_upper_compat = os.path.join(RW, "rw/root")
