@@ -38,6 +38,16 @@ def ensure_dev_mounted():
     if libc.mount(b"udev", b"/dev", b"devtmpfs", 0, b"mode=0755,size=10M") < 0:
         raise Exception("/dev counldn't be mounted")
 
+def get_fstype(device):
+    with subprocess.Popen(["/sbin/blkid","-s","TYPE","-o","value",device],stdout=subprocess.PIPE, stderr=subprocess.PIPE) as blkid:
+        output, error = blkid.communicate()
+        exit_code = blkid.returncode
+    if exit_code != 0:
+        print("Determining filesystem type failed: %s" % error.decode().strip())
+        return None
+    #else
+    return output.decode().strip()
+
 def mount_tmpfs(target):
     os.makedirs(target,exist_ok=True)
     if libc.mount(b"tmpfs", target.encode(), b"tmpfs", MS_RELATIME, b"") < 0:
@@ -177,6 +187,13 @@ def main(data_partition=None):
     ensure_run_mounted()
     ensure_sys_mounted()
     ensure_proc_mounted()
+
+    fstype = get_fstype(data_partition)
+    if fstype == "crypto_LUKS":
+        if subprocess.call(["/sbin/cryptsetup","open", data_partition,"data"]) == 0:
+            data_partition = "/dev/mapper/data"
+        else: 
+            data_partition = None
 
     os.mkdir(RW)
     if data_partition is not None and is_mountable_block_device(data_partition):
