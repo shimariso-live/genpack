@@ -188,7 +188,7 @@ def main(data_partition=None):
     ensure_sys_mounted()
     ensure_proc_mounted()
 
-    fstype = get_fstype(data_partition)
+    fstype = get_fstype(data_partition) if data_partition is not None else None
     if fstype == "crypto_LUKS":
         if subprocess.call(["/sbin/cryptsetup","open", data_partition,"data"]) == 0:
             data_partition = "/dev/mapper/data"
