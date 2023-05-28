@@ -102,7 +102,7 @@ def get_newest_mtime(srcdir):
 def put_resource_file(gentoo_dir, module, filename, dst_filename=None, make_executable=False):
     dst_path = os.path.join(gentoo_dir, dst_filename if dst_filename is not None else filename)
     with Tee(dst_path) as f:
-        f.write(importlib.resources.read_binary(module, filename))
+        f.write(importlib.resources.files(module).joinpath(filename).read_bytes())
     if make_executable: subprocess.check_output(sudo(["chmod", "+x", dst_path]))
 
 def load_json_file(path):
