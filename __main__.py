@@ -282,8 +282,9 @@ def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_js
             "-E", "PROFILE=%s" % profile, "-E", "ARTIFACT=%s" % artifact, 
             "/prepare-artifact.sh" ]))
 
-    artifact_pkgs = ["gentoo-systemd-integration", "util-linux","timezone-data","bash","gzip","openssh", "coreutils", "procps", "net-tools", 
-        "iproute2", "iputils", "dbus", "python", "rsync", "tcpdump", "ca-certificates","e2fsprogs"]
+    artifact_pkgs = ["gentoo-systemd-integration", "util-linux","timezone-data","bash","gzip",
+                     "grep","openssh", "coreutils", "procps", "net-tools", "iproute2", "iputils", 
+                     "dbus", "python", "rsync", "tcpdump", "ca-certificates","e2fsprogs"]
     if build_json and "packages" in build_json:
         if not isinstance(build_json["packages"], list): raise Exception("packages must be list")
         #else
