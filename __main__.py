@@ -1,626 +1,139 @@
 #!/usr/bin/python3
-# Copyright (c) 2021 Walbrix Corporation
+# Copyright (c) 2021-2023 Walbrix Corporation
 # https://github.com/wbrxcorp/genpack/blob/main/LICENSE
 
-import os,re,argparse,subprocess,glob,json,uuid
-import importlib.resources
-import urllib.request
+import os,sys,subprocess,atexit,logging
+import upstream,workdir,genpack_profile,genpack_artifact,qemu
+from sudo import sudo
 
-import initlib,init,util
-import qemu
-from sudo import sudo,Tee
-
-BASE_URL="http://ftp.iij.ad.jp/pub/linux/gentoo/"
-CONTAINER_NAME="genpack-%d" % os.getpid()
-
-def decode_utf8(bin):
-    return bin.decode("utf-8")
-
-def encode_utf8(str):
-    return str.encode("utf-8")
-
-def url_readlines(url):
-    req = urllib.request.Request(url)
-    with urllib.request.urlopen(req) as res:
-        return map(decode_utf8, res.readlines())
-
-def get_latest_stage3_tarball_url(base,arch):
-    if not base.endswith('/'): base += '/'
-    _arch = arch
-    _arch2 = arch
-    if _arch == "x86_64": _arch = _arch2 = "amd64"
-    elif _arch == "i686": _arch = "x86"
-    elif _arch == "aarch64": _arch = _arch2 = "arm64"
-    for line in url_readlines(base + "releases/" + _arch + "/autobuilds/latest-stage3-" + _arch2 + "-systemd.txt"):
-        line = re.sub(r'#.*$', "", line.strip())
-        if line == "": continue
-        #else
-        splitted = line.split(" ")
-        if len(splitted) < 2: continue
-        #else
-        return base + "releases/" + _arch + "/autobuilds/" + splitted[0]
-    return None # not found
-
-def get_content_length(url):
-    req = urllib.request.Request(url, method="HEAD")
-    with urllib.request.urlopen(req) as res:
-        headers = res.info()
-        if "Content-Length" in headers:
-            return int(headers["Content-Length"])
-    #else
-    return None
-
-def lower_exec(lower_dir, cache_dir, portage_dir, cmdline, nspawn_opts=[]):
-    subprocess.check_call(sudo(
-        ["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", lower_dir, 
-            "--bind=%s:/var/cache" % os.path.abspath(cache_dir),
-            "--capability=CAP_MKNOD,CAP_SYS_ADMIN",
-            "--bind-ro=%s:/var/db/repos/gentoo" % os.path.abspath(portage_dir) ]
-            + nspawn_opts + cmdline)
-    )
-
-def scan_files(dir):
-    files_found = []
-    newest_file = 0
-    for root,dirs,files in os.walk(dir, followlinks=True):
-        if len(files) == 0: continue
-        for f in files:
-            mtime = os.stat(os.path.join(root,f)).st_mtime
-            if mtime > newest_file: newest_file = mtime
-            files_found.append(os.path.join(root[len(dir) + 1:], f))
-    return (files_found, newest_file)
-
-def link_files(srcdir, dstdir):
-    files_to_link, newest_file = scan_files(srcdir)
-
-    for f in files_to_link:
-        src = os.path.join(srcdir, f)
-        dst = os.path.join(dstdir, f)
-        dst_dir = os.path.dirname(dst)
-        if os.path.exists(dst_dir):
-            if not os.path.isdir(dst_dir): raise Exception("%s should be a directory" % dst_dir)
-        else:
-            subprocess.check_call(sudo(["mkdir", "-p", dst_dir]))
-        subprocess.check_call(sudo(["ln", "-f", src, dst]))
-    
-    return newest_file
-
-def sync_files(srcdir, dstdir, exclude=None):
-    files_to_sync, newest_file = scan_files(srcdir)
-
-    for f in files_to_sync:
-        if exclude is not None and re.match(exclude, f): continue
-        src = os.path.join(srcdir, f)
-        dst = os.path.join(dstdir, f)
-        subprocess.check_call(sudo(["rsync", "-k", "-R", "--chown=root:root", os.path.join(srcdir, ".", f), dstdir]))
-    
-    return newest_file
-
-def get_newest_mtime(srcdir):
-    return scan_files(srcdir)[1]
-
-def put_resource_file(gentoo_dir, module, filename, dst_filename=None, make_executable=False):
-    dst_path = os.path.join(gentoo_dir, dst_filename if dst_filename is not None else filename)
-    with Tee(dst_path) as f:
-        f.write(importlib.resources.files(module).joinpath(filename).read_bytes())
-    if make_executable: subprocess.check_output(sudo(["chmod", "+x", dst_path]))
-
-def load_json_file(path):
-    if not os.path.isfile(path): return None
-    #else
-    with open(path) as f:
-        return json.load(f)
-
-def set_gitignore(workdir):
-    work_gitignore = os.path.join(workdir, ".gitignore")
-    if not os.path.exists(work_gitignore):
-        with open(work_gitignore, "w") as f:
-            f.write("/*")
-
-def extract_portage(base, workdir):
-    portage_tarball_url = base + "snapshots/portage-latest.tar.xz"
-    portage_tarball = os.path.join(workdir, "portage.tar.xz")
-    portage_dir = os.path.join(workdir, "portage")
-    trash_dir = os.path.join(workdir, "trash")
-    done_file = os.path.join(portage_dir, ".done")
-
-    os.makedirs(workdir, exist_ok=True)
-    set_gitignore(workdir)
-
-    if not os.path.isfile(portage_tarball) or os.path.getsize(portage_tarball) != get_content_length(portage_tarball_url):
-        subprocess.check_call(["wget", "-O", portage_tarball, portage_tarball_url])
-        if os.path.exists(done_file): os.remove(done_file)
-
-    if os.path.isdir(portage_dir) and not os.path.exists(done_file):
-        os.makedirs(trash_dir, exist_ok=True)
-        os.rename(portage_dir, os.path.join(trash_dir, str(uuid.uuid4())))
-
-    if not os.path.isdir(portage_dir):
-        os.makedirs(portage_dir, exist_ok=True)
-        print("Extracting portage...")
-        subprocess.check_call(sudo(["tar", "xpf", portage_tarball, "--strip-components=1", "-C", portage_dir]))
-        with open(done_file, "w") as f:
-            pass
-
-def main(base, workdir, arch, sync, bash, artifact, outfile=None, profile=None):
-    artifact_dir = os.path.join(".", "artifacts", artifact)
-    build_json = load_json_file(os.path.join(artifact_dir, "build.json"))
-
-    if profile is None:
-        profile = "default"
-        if build_json and "profile" in build_json: profile = build_json["profile"]
-
-    stage3_tarball_url = get_latest_stage3_tarball_url(base,arch)
-
-    arch_workdir = os.path.join(workdir, arch)
-    os.makedirs(arch_workdir, exist_ok=True)
-    set_gitignore(workdir)
-
-    stage3_tarball = os.path.join(arch_workdir, "stage3.tar.xz")
-    portage_dir = os.path.join(workdir, "portage")
-
-    profile_workdir = os.path.join(arch_workdir, "profiles", profile)
-    cache_dir = os.path.join(profile_workdir, "cache")
-    gentoo_dir = os.path.join(profile_workdir, "root")
-
-    repos_dir = os.path.join(gentoo_dir, "var/db/repos/gentoo")
-    usr_local_dir = os.path.join(gentoo_dir, "usr/local")
-
-    trash_dir = os.path.join(workdir, "trash")
-
-    if not os.path.isfile(stage3_tarball) or os.path.getsize(stage3_tarball) != get_content_length(stage3_tarball_url):
-        subprocess.check_call(["wget", "-O", stage3_tarball, stage3_tarball_url])
-    
-    stage3_done_file = os.path.join(gentoo_dir, ".stage3-done")
-    stage3_done_file_time = os.stat(stage3_done_file).st_mtime if os.path.isfile(stage3_done_file) else None
-    if not stage3_done_file_time or stage3_done_file_time < os.stat(stage3_tarball).st_mtime:
-        if os.path.isdir(gentoo_dir):
-            os.makedirs(trash_dir, exist_ok=True)
-            os.rename(gentoo_dir, os.path.join(trash_dir, str(uuid.uuid4())))
-        os.makedirs(repos_dir, exist_ok=True)
-        print("Extracting stage3...")
-        subprocess.check_call(sudo(["tar", "xpf", stage3_tarball, "--strip-components=1", "-C", gentoo_dir]))
-        kernel_config_dir = os.path.join(gentoo_dir, "etc/kernels")
-        subprocess.check_call(sudo(["mkdir", "-p", kernel_config_dir]))
-        subprocess.check_call(sudo(["chmod", "-R", "o+rw", 
-            os.path.join(gentoo_dir, "etc/portage"), os.path.join(gentoo_dir, "usr/src"), 
-            os.path.join(gentoo_dir, "var/db/repos"), os.path.join(gentoo_dir, "var/cache"), 
-            kernel_config_dir, usr_local_dir]))
-        with open(os.path.join(gentoo_dir, "etc/portage/make.conf"), "a") as f:
-            f.write('FEATURES="-sandbox -usersandbox -network-sandbox"\n')
-        with open(stage3_done_file, "w") as f:
-            pass
-
-    newest_file = link_files(os.path.join(".", "profiles", profile), gentoo_dir)
-    # remove irrelevant arch dependent settings
-    for i in glob.glob(os.path.join(gentoo_dir, "etc/portage/package.*/arch-*")):
-        if not i.endswith("-" + arch) and os.path.isfile(i): os.unlink(i)
-    for i in glob.glob(os.path.join(gentoo_dir, "etc/portage/sets/*.%s" % arch)):
-        if os.path.isfile(i): os.rename(i,  i[:i.rfind(".")])
-
-    # move files under /var/cache
-    os.makedirs(cache_dir, exist_ok=True)
-    subprocess.check_call(sudo(["rsync", "-a", "--remove-source-files", os.path.join(gentoo_dir,"var/cache/"), cache_dir]))
-
-    put_resource_file(gentoo_dir, initlib, "initlib.cpp")
-    put_resource_file(gentoo_dir, initlib, "initlib.h")
-    put_resource_file(gentoo_dir, initlib, "fat.cpp")
-    put_resource_file(gentoo_dir, initlib, "fat.h")
-    put_resource_file(gentoo_dir, init, "init.cpp")
-    put_resource_file(gentoo_dir, init, "init.h")
-    put_resource_file(gentoo_dir, init, "init-systemimg.cpp")
-    put_resource_file(gentoo_dir, init, "init-paravirt.cpp")
-    put_resource_file(gentoo_dir, util, "build-kernel.py", "usr/local/sbin/build-kernel", True)
-    put_resource_file(gentoo_dir, util, "recursive-touch.py", "usr/local/bin/recursive-touch", True)
-    put_resource_file(gentoo_dir, util, "overlay_init.py", "sbin/overlay-init", True)
-    put_resource_file(gentoo_dir, util, "with-mysql.py", "usr/local/sbin/with-mysql", True)
-    put_resource_file(gentoo_dir, util, "download.py", "usr/local/bin/download", True)
-    put_resource_file(gentoo_dir, util, "install-system-image", "usr/sbin/install-system-image", True)
-    put_resource_file(gentoo_dir, util, "expand-rw-layer", "usr/sbin/expand-rw-layer", True)
-    put_resource_file(gentoo_dir, util, "do-with-lvm-snapshot", "usr/sbin/do-with-lvm-snapshot", True)
-    put_resource_file(gentoo_dir, util, "genpack-install.cpp", "usr/src/genpack-install.cpp", True)
-
-    if sync: lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "--sync"])
-    if bash: 
-        print("Entering shell... 'exit 1' to abort the process.")
-        lower_exec(gentoo_dir, cache_dir, portage_dir, ["bash"])
-
-    done_file = os.path.join(gentoo_dir, ".done")
-    done_file_time = os.stat(done_file).st_mtime if os.path.isfile(done_file) else None
-
-    portage_time = os.stat(os.path.join(portage_dir, "metadata/timestamp")).st_mtime
-    newest_file = max(newest_file, portage_time)
-
-    if (not done_file_time or newest_file > done_file_time or sync or artifact == "none"):
-        lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "-uDN", "-bk", "--binpkg-respect-use=y", 
-            "system", "nano", "gentoolkit", "pkgdev", 
-            "strace", "vim", "tcpdump", "netkit-telnetd"])
-        if os.path.isfile(os.path.join(gentoo_dir, "build.sh")):
-            lower_exec(gentoo_dir, cache_dir, portage_dir, ["/build.sh"])
-        lower_exec(gentoo_dir, cache_dir, portage_dir, ["sh", "-c", "emerge -bk --binpkg-respect-use=y @preserved-rebuild && emerge --depclean && etc-update --automode -5 && eclean-dist -d && eclean-pkg -d"])
-        with open(done_file, "w") as f:
-            pass
-    
-    if artifact == "none": return None # no build artifact
-    elif artifact == "bash": 
-        lower_exec(gentoo_dir, cache_dir, portage_dir, ["bash"])
-        return None
-    #else
-
-    ##### building profile done
-    ##### build artifact if necessary
-    upper_dir = os.path.join(arch_workdir, "artifacts", artifact)
-    genpack_packages_file = os.path.join(upper_dir, ".genpack", "packages") # use its timestamp as build date
-    if not os.path.exists(genpack_packages_file) or os.stat(genpack_packages_file).st_mtime < max(os.stat(done_file).st_mtime, get_newest_mtime(artifact_dir), get_newest_mtime(os.path.join(".", "packages"))):
-        if os.path.isdir(upper_dir):
-            os.makedirs(trash_dir, exist_ok=True)
-            subprocess.check_call(sudo(["mv", upper_dir, os.path.join(trash_dir, str(uuid.uuid4()))]))
-        build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_json)
-
-    # final output
-    if outfile is None:
-        if build_json and "outfile" in build_json: outfile = build_json["outfile"]
-        else: outfile = "%s-%s.squashfs" % (artifact, arch)
-
-    if outfile == "-":
-        subprocess.check_call(sudo(["systemd-nspawn", "--suppress-sync=true", "-M", CONTAINER_NAME, "-q", "-D", upper_dir, "--network-veth", "-b"]))
-        return None
-    #else
-    if not os.path.isfile(outfile) or os.stat(genpack_packages_file).st_mtime > os.stat(outfile).st_mtime:
-        compression = build_json["compression"] if build_json and "compression" in build_json else "gzip"
-        pack(upper_dir, outfile, compression)
-    return outfile
-
-def build_artifact(profile, artifact, gentoo_dir, cache_dir, upper_dir, build_json):
-    os.makedirs(os.path.dirname(upper_dir), exist_ok=True)
-    subprocess.check_call(sudo(["mkdir", upper_dir]))
-    if os.path.isfile(os.path.join(gentoo_dir, "prepare-artifact.sh")):
-        print("Preparing for artifact...")
-        subprocess.check_call(sudo(["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", gentoo_dir, 
-            "--overlay=+/:%s:/" % os.path.abspath(upper_dir), 
-            "--bind=%s:/var/cache" % os.path.abspath(cache_dir),
-            "-E", "PROFILE=%s" % profile, "-E", "ARTIFACT=%s" % artifact, 
-            "/prepare-artifact.sh" ]))
-
-    artifact_pkgs = ["gentoo-systemd-integration", "util-linux","timezone-data","bash","gzip",
-                     "grep","openssh", "coreutils", "procps", "net-tools", "iproute2", "iputils", 
-                     "dbus", "python", "rsync", "tcpdump", "ca-certificates","e2fsprogs"]
-    if build_json and "packages" in build_json:
-        if not isinstance(build_json["packages"], list): raise Exception("packages must be list")
-        #else
-        artifact_pkgs += build_json["packages"]
-    
-    devel = build_json and "devel" in build_json and build_json["devel"] == True 
-
-    pkg_map = collect_packages(gentoo_dir)
-    pkgs = scan_pkg_dep(gentoo_dir, pkg_map, artifact_pkgs)
-    packages_dir = os.path.join(".", "packages")
-    files = process_pkgs(gentoo_dir, packages_dir, pkgs, devel)
-    if os.path.isfile(os.path.join(gentoo_dir, "boot/kernel")): files.append("/boot/kernel")
-    if os.path.isfile(os.path.join(gentoo_dir, "boot/initramfs")): files.append("/boot/initramfs")
-    if os.path.isdir(os.path.join(gentoo_dir, "lib/modules")): files.append("/lib/modules/.")
-    files += ["/dev/.", "/proc", "/sys", "/root", "/home", "/tmp", "/var/tmp", "/var/run", "/run", "/mnt"]
-    files += ["/etc/passwd", "/etc/group", "/etc/shadow", "/etc/profile.env"]
-    files += ["/etc/ld.so.conf", "/etc/ld.so.conf.d/."]
-    files += ["/usr/lib/locale/locale-archive"]
-    files += ["/bin/sh", "/bin/sed", "/usr/bin/awk", "/usr/bin/python", "/bin/nano", 
-        "/bin/tar", "/usr/bin/unzip",
-        "/usr/bin/wget", "/usr/bin/curl", "/usr/bin/telnet",
-        "/usr/bin/make", "/usr/bin/diff", "/usr/bin/patch", "/usr/bin/strings", "/usr/bin/strace", 
-        "/usr/bin/find", "/usr/bin/xargs", "/usr/bin/less"]
-    files += ["/sbin/iptables", "/sbin/ip6tables", "/sbin/iptables-restore", "/sbin/ip6tables-restore", "/sbin/iptables-save", "/sbin/ip6tables-save"]
-
-    if build_json and "files" in build_json:
-        if not isinstance(build_json["files"], list): raise Exception("files must be list")
-        #else
-        files += build_json["files"]
-
-    print("Copying files to artifact dir...")
-    copy(gentoo_dir, upper_dir, files)
-    copyup_gcc_libs(gentoo_dir, upper_dir)
-    remove_root_password(upper_dir)
-    make_ld_so_conf_latest(upper_dir)
-    create_default_iptables_rules(upper_dir)
-    set_locale_to_envvar(upper_dir)
-
-    # per-package setup
-    newest_pkg_file = 0
-    for pkg in pkgs:
-        pkg_wo_ver = pkg if pkg[0] == '@' else strip_ver(pkg)
-        package_dir = os.path.join(packages_dir, pkg_wo_ver)
-        if not os.path.isdir(package_dir): continue
-        #else
-        print("Processing package %s..." % pkg_wo_ver)
-        newest_pkg_file = max(newest_pkg_file, sync_files(package_dir, upper_dir, r"^CONTENTS(\.|$)"))
-        if os.path.isfile(os.path.join(upper_dir, "pkgbuild")):
-            subprocess.check_call(sudo(["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", gentoo_dir, "--overlay=+/:%s:/" % os.path.abspath(upper_dir), 
-                "--bind=%s:/var/cache" % os.path.abspath(cache_dir),
-                "-E", "PROFILE=%s" % profile, "-E", "ARTIFACT=%s" % artifact, 
-                "--capability=CAP_MKNOD",
-                "sh", "-c", "/pkgbuild && rm -f /pkgbuild" ]))
-
-    # enable services
-    services = ["sshd","systemd-networkd", "systemd-resolved"]
-    if build_json and "services" in build_json:
-        if not isinstance(build_json["services"], list): raise Exception("services must be list")
-        #else
-        services += build_json["services"]
-    enable_services(upper_dir, services)
-
-    # artifact specific setup
-    artifact_dir = os.path.join(".", "artifacts", artifact)
-    newest_artifact_file = max(newest_pkg_file, sync_files(artifact_dir, upper_dir))
-    if os.path.isfile(os.path.join(upper_dir, "build")):
-        print("Building artifact...")
-        subprocess.check_call(sudo(["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", gentoo_dir, 
-            "--overlay=+/:%s:/" % os.path.abspath(upper_dir), 
-            "--bind=%s:/var/cache" % os.path.abspath(cache_dir),
-            "-E", "PROFILE=%s" % profile, "-E", "ARTIFACT=%s" % artifact, 
-            "/build" ]))
+def prepare(args):
+    profiles = []
+    if len(args.profile) == 0 and os.path.isdir("./profiles"):
+        profiles += genpack_profile.Profile.get_all_profiles()
     else:
-        print("Artifact build script not found.")
-    subprocess.check_call(sudo(["rm", "-rf", os.path.join(upper_dir, "build"), os.path.join(upper_dir,"build.json"), os.path.join(upper_dir,"usr/src")]))
+        for profile in args.profile:
+            profiles.append(genpack_profile.Profile(profile))
+    if len(profiles) == 0: profiles.append(genpack_profile.Profile("default"))
 
-    # generate metadata
-    genpack_metadata_dir = os.path.join(upper_dir, ".genpack")
-    subprocess.check_call(sudo(["mkdir", "-p", genpack_metadata_dir]))
-    subprocess.check_call(sudo(["chmod", "o+rwx", genpack_metadata_dir]))
-    with open(os.path.join(genpack_metadata_dir, "profile"), "w") as f:
-        f.write(profile)
-    with open(os.path.join(genpack_metadata_dir, "artifact"), "w") as f:
-        f.write(artifact)
-    with open(os.path.join(genpack_metadata_dir, "packages"), "w") as f:
-        for pkg in pkgs:
-            if pkg[0] != '@': f.write(pkg + '\n')
-    subprocess.check_call(sudo(["chown", "-R", "root:root", genpack_metadata_dir]))
-    subprocess.check_call(sudo(["chmod", "755", genpack_metadata_dir]))
+    for profile in profiles:
+        print("Preparing profile %s..." % profile.name)
+        genpack_profile.prepare(profile, args.sync, args.force_build)
 
-def strip_ver(pkgname):
-    pkgname = re.sub(r'-r[0-9]+?$', "", pkgname) # remove rev part
-    last_dash = pkgname.rfind('-')
-    if last_dash < 0: return pkgname
-    next_to_dash = pkgname[last_dash + 1]
-    return pkgname[:last_dash] if pkgname.find('/') < last_dash and (next_to_dash >= '0' and next_to_dash <= '9') else pkgname
+def bash(args):
+    profile = genpack_profile.Profile(args.profile)
+    genpack_profile.bash(profile)
 
-def collect_packages(gentoo_dir):
-    pkg_map = {}
-    db_dir = os.path.join(gentoo_dir, "var/db/pkg")
-    for category in os.listdir(db_dir):
-        cat_dir = os.path.join(db_dir, category)
-        if not os.path.isdir(cat_dir): continue
-        #else
-        for pn in os.listdir(cat_dir):
-            pkg_dir = os.path.join(cat_dir, pn)
-            if not os.path.isdir(pkg_dir): continue
-            #else
-            cat_pn = "%s/%s" % (category, pn)
-            pn_wo_ver = strip_ver(pn)
-            cat_pn_wo_ver = "%s/%s" % (category, pn_wo_ver)
-            if pn_wo_ver in pkg_map: pkg_map[pn_wo_ver].append(cat_pn)
-            else: pkg_map[pn_wo_ver] = [cat_pn]
-            if cat_pn_wo_ver in pkg_map: pkg_map[cat_pn_wo_ver].append(cat_pn)
-            else: pkg_map[cat_pn_wo_ver] = [cat_pn]
-    return pkg_map
-
-def get_package_set(gentoo_dir, set_name):
-    pkgs = []
-    with open(os.path.join(gentoo_dir, "etc/portage/sets", set_name)) as f:
-        for line in f:
-            line = re.sub(r'#.*', "", line).strip()
-            if line != "": pkgs.append(line)
-    return pkgs
-
-def split_rdepend(line):
-    if line.startswith("|| ( "):
-        idx = 5
-        level = 0
-        while idx < len(line):
-            ch = line[idx]
-            if ch == '(': level += 1
-            elif ch == ')':
-                if level == 0:
-                    idx += 1
-                    break
-                else: level -= 1
-            idx += 1
-        leftover = line[idx:].strip()
-        return (line[:idx], None if leftover == "" else leftover)
-
-    #else:
-    splitted = line.split(' ', 1)
-    if len(splitted) == 1: return (splitted[0],None)
-    #else
-    return (splitted[0], splitted[1])
-
-def parse_rdepend_line(line, make_optional=False):
-    p = []
-    while line is not None and line.strip() != "":
-        splitted = split_rdepend(line)
-        p.append(splitted[0])
-        line = splitted[1]
-
-    pkgs = set()
-    for pkg in p:
-        m = re.match(r"\|\| \( (.+) \)", pkg)
-        if m:
-            pkgs |= parse_rdepend_line(m.group(1), True)
-            continue
-        if pkg[0] == '!': continue
-        if pkg[0] == '~': pkg = pkg[1:]
-        #else
-        pkg_stripped = strip_ver(re.sub(r':.+$', "", re.sub(r'\[.+\]$', "", re.sub(r'^(<=|>=|=|<|>)', "", pkg))))
-        pkgs.add('?' + pkg_stripped if make_optional else pkg_stripped)
-    return pkgs
-
-def scan_pkg_dep(gentoo_dir, pkg_map, pkgnames, pkgs = None):
-    if pkgs is None: pkgs = set()
-    for pkgname in pkgnames:
-        if pkgname[0] == '@':
-            pkgs.add(pkgname)
-            scan_pkg_dep(gentoo_dir, pkg_map, get_package_set(gentoo_dir, pkgname[1:]), pkgs)
-            continue
-        optional = False
-        if pkgname[0] == '?': 
-            optional = True
-            pkgname = pkgname[1:]
-        if pkgname not in pkg_map:
-            if optional: continue
-            else: raise BaseException("Package %s not found" % pkgname)
-        #else
-        for cat_pn in pkg_map[pkgname]:
-            cat_pn_wo_ver = strip_ver(cat_pn)
-            if cat_pn in pkgs: continue # already exists
-
-            pkgs.add(cat_pn) # add self
-            rdepend_file = os.path.join(gentoo_dir, "var/db/pkg", cat_pn, "RDEPEND")
-            if os.path.isfile(rdepend_file):
-                with open(rdepend_file) as f:
-                    line = f.read().strip()
-                    if len(line) > 0:
-                        rdepend_pkgnames = parse_rdepend_line(line)
-                        if len(rdepend_pkgnames) > 0: scan_pkg_dep(gentoo_dir, pkg_map, rdepend_pkgnames, pkgs)
-
-    return pkgs
-
-def is_path_excluded(path, devel = False):
-    exclude_patterns = ["/run/","/var/run/","/var/lock/","/var/cache/",
-        re.compile(r"\/gschemas.compiled$"), re.compile(r"\/giomodule.cache$")]
-    if not devel: exclude_patterns += ["/usr/share/man/","/usr/share/doc/","/usr/share/gtk-doc/","/usr/share/info/",
-        "/usr/include/",re.compile(r'^/usr/lib/python[0-9\.]+?/test/'),re.compile(r'\.a$')]
-    for expr in exclude_patterns:
-        if isinstance(expr, re.Pattern):
-            if re.search(expr, path): return True
-        elif isinstance(expr, str):
-            if path.startswith(expr): return True
-        else:
-            raise Exception("Unknown type")
-    return False
-
-def process_pkgs(gentoo_dir, packages_dir, pkgs, devel = False):
-    files = []
-    for pkg in pkgs:
-        if pkg[0] == '@': continue
-        contents_file = os.path.join(gentoo_dir, "var/db/pkg" , pkg, "CONTENTS")
-        overridden_contents_file = os.path.join(packages_dir, strip_ver(pkg), "CONTENTS")
-        if os.path.isfile(os.path.join(overridden_contents_file)):
-            contents_file = overridden_contents_file
-        if not os.path.isfile(contents_file): continue
-        #else
-        with open(contents_file) as f:
-            while line := f.readline():
-                line = re.sub(r'#.*$', "", line).strip()
-                if line == "": continue
-                file_to_append = None
-                if line.startswith("obj "): 
-                    file_to_append = re.sub(r' [0-9a-f]+ [0-9]+$', "", line[4:])
-                elif line.startswith("sym "):
-                    file_to_append = re.sub(r' -> .+$', "", line[4:])
-                if file_to_append is not None and not is_path_excluded(file_to_append, devel): files.append(file_to_append)
-    return files
-
-def copy(gentoo_dir, upper_dir, files):
-    if not gentoo_dir.endswith('/'): gentoo_dir += '/'
-    # files / dirs to shallow copy
-    rsync = subprocess.Popen(sudo(["rsync", "-lptgoD", "--keep-dirlinks", "--files-from=-", gentoo_dir, upper_dir]), stdin=subprocess.PIPE)
-    for f in files:
-        if f.endswith("/."): continue
-        f_wo_leading_slash = re.sub(r'^/', "", f)
-        rsync.stdin.write(encode_utf8(f_wo_leading_slash + '\n'))
-        src_path = os.path.join(gentoo_dir, f_wo_leading_slash)
-        if os.path.islink(src_path):
-            link = os.readlink(src_path)
-            target = link[1:] if link[0] == '/' else os.path.join(os.path.dirname(f_wo_leading_slash), link)
-            if os.path.exists(os.path.join(gentoo_dir, target)):
-                rsync.stdin.write(encode_utf8(target + '\n'))
-    rsync.stdin.close()
-    if rsync.wait() != 0: raise BaseException("rsync returned error code.")
-
-    # dirs to deep copy
-    rsync = subprocess.Popen(sudo(["rsync", "-ar", "--keep-dirlinks", "--files-from=-", gentoo_dir, upper_dir]), stdin=subprocess.PIPE)
-    for f in files:
-        if not f.endswith("/."): continue
-        f_wo_leading_slash = re.sub(r'^/', "", f)
-        rsync.stdin.write(encode_utf8(f_wo_leading_slash + '\n'))
-        src_path = os.path.join(gentoo_dir, f_wo_leading_slash)
-    rsync.stdin.close()
-    if rsync.wait() != 0: raise BaseException("rsync returned error code.")
-
-def copyup_gcc_libs(gentoo_dir, upper_dir):
-    subprocess.check_call(sudo(["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", gentoo_dir, "--overlay=+/:%s:/" % os.path.abspath(upper_dir), "sh", "-c", "touch -h `gcc --print-file-name=`/*.so.* && ldconfig" ]))
-
-def remove_root_password(root_dir):
-    subprocess.check_call(sudo(["sed", "-i", r"s/^root:\*:/root::/", os.path.join(root_dir, "etc/shadow") ]))
-
-def make_ld_so_conf_latest(root_dir):
-    subprocess.check_call(sudo(["touch", os.path.join(root_dir, "etc/ld.so.conf") ]))
-
-def create_default_iptables_rules(root_dir):
-    subprocess.check_call(sudo(["touch", os.path.join(root_dir, "var/lib/iptables/rules-save"), os.path.join(root_dir, "var/lib/ip6tables/rules-save")]))
-
-def set_locale_to_envvar(root_dir):
-    subprocess.check_call(sudo(["sed", "-i", r"s/^export LANG=.\+$/\[ -f \/etc\/locale\.conf \] \&\& . \/etc\/locale.conf \&\& export LANG/", os.path.join(root_dir, "etc/profile.env") ]))
-
-def enable_services(root_dir, services):
-    if not isinstance(services, list): services = [services]
-    subprocess.check_call(sudo(["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", root_dir, "systemctl", "enable"] + services))
-
-def pack(upper_dir, outfile, compression="gzip"):
-    cmdline = ["mksquashfs", upper_dir, outfile, "-noappend", "-no-exports"]
-    if compression == "xz": cmdline += ["-comp", "xz", "-b", "1M", "-Xbcj", "x86"]
-    elif compression == "gzip": cmdline += ["-Xcompression-level", "1"]
-    elif compression == "lzo": cmdline += ["-comp", "lzo"]
-    else: raise BaseException("Unknown compression type %s" % compression)
-    subprocess.check_call(sudo(cmdline))
-    subprocess.check_call(sudo(["chown", "%d:%d" % (os.getuid(), os.getgid()), outfile]))
-
-def clean(workdir, arch, profile=None):
-    portage = os.path.join(workdir, "portage.tar.xz")
-    archdir = os.path.join(workdir, arch)
-    stage3 = os.path.join(archdir, "stage3.tar.xz")
-    profiles = os.path.join(archdir, "profiles")
-    artifacts = os.path.join(archdir, "artifacts")
-    subprocess.check_call(sudo(["rm", "-rf", portage, stage3, profiles, artifacts]))
-
-if __name__ == "__main__":
-    arch = os.uname().machine
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--base", default=BASE_URL, help="Base URL contains dirs 'releases' 'snapshots'")
-    parser.add_argument("--workdir", default="./work", help="Working directory to use")
-    parser.add_argument("-o", "--outfile", default=None, help="Output file")
-    parser.add_argument("--sync", action="store_true", default=False, help="Run emerge --sync before build gentoo")
-    parser.add_argument("--bash", action="store_true", default=False, help="Enter bash before anything")
-    parser.add_argument("--qemu", action="store_true", default=False, help="Run generated rootfs using qemu")
-    parser.add_argument("--drm", action="store_true", default=False, help="Enable DRM(virgl) when running qemu")
-    parser.add_argument("--data-volume", action="store_true", default=False, help="Create data partition when running qemu")
-    parser.add_argument("--system-ini", default=None, help="system.ini file when running qemu")
-    parser.add_argument("--profile", default=None, help="Override profile")
-    parser.add_argument("artifact", default=[], nargs='*', help="Artifacts to build")
-    args = parser.parse_args()
-
+def build(args):
     artifacts = []
     if len(args.artifact) == 0 and os.path.isdir("./artifacts"):
-        for i in os.listdir("./artifacts"):
-            if os.path.isdir(os.path.join("./artifacts", i)): artifacts.append(i)
+        artifacts += genpack_artifact.Artifact.get_all_artifacts()
     else:
-        artifacts += args.artifact
+        for artifact in args.artifact:
+            artifacts.append(genpack_artifact.Artifact(artifact))
     
-    if len(artifacts) == 0: artifacts.append("default")
+    if len(artifacts) == 0: artifact.append(genpack_artifact.Artifact("default"))
 
-    extract_portage(args.base, args.workdir)
+    profiles = set()
 
     for artifact in artifacts:
-        if artifact != "default" and not os.path.isdir(os.path.join("./artifacts", artifact)):
-            raise BaseException("No such artifact: %s" % artifact)
-        print("Processing artifact %s..." % artifact)
-        if args.artifact == "clean":
-            clean(args.workdir, arch, args.profile)
+        profiles.add(artifact.get_profile())
+
+    for profile in profiles:
+        print("Preparing profile %s..." % profile.name)
+        genpack_profile.prepare(profile)
+
+    for artifact in artifacts:
+        if artifact.is_up_to_date():
+            print("Artifact %s is up-to-date" % artifact.name)
         else:
-            outfile = main(args.base, args.workdir, arch, args.sync, args.bash, artifact, args.outfile, args.profile)
-            if outfile is not None and args.qemu:
-                qemu.run(outfile, os.path.join(args.workdir, "qemu.img"), args.drm, args.data_volume, args.system_ini)
-        print("Done.")
+            print("Building artifact %s..." % artifact.name)
+            genpack_artifact.build(artifact)
+        if not artifact.is_outfile_up_to_date():
+            print("Packing artifact %s..." % artifact.name)
+            genpack_artifact.pack(artifact)
+
+    print("Done.")
     
-    trash_dir = os.path.join(args.workdir, "trash")
-    if os.path.isdir(trash_dir):
-        print("Cleaning up...")
-        subprocess.check_call(sudo(["rm", "-rf", trash_dir]))
+def run(args):
+    artifact = genpack_artifact.Artifact(args.artifact)
+
+    if not artifact.is_up_to_date():
+        print("Artifact %s is not up-to-date" % artifact.name)
+        sys.exit(1)
+
+    print("Pressing ']' 3 times will exit the container and return to the host.")
+    cmdline = ["systemd-nspawn", "--suppress-sync=true", "-M", "genpack-run-%d" % os.getpid(), "-q", "-D", artifact.get_workdir(), "--network-veth"]
+    if args.bash: cmdline.append("/bin/bash")
+    else: cmdline.append("-b")
+    subprocess.call(sudo(cmdline))
+
+def _qemu(args):
+    artifact = genpack_artifact.Artifact(args.artifact)
+    outfile = artifact.get_outfile()
+    qemu.run(outfile, os.path.join(args.workdir, "qemu.img"), args.drm, args.data_volume, args.system_ini)
+
+def clean(args):
+    subprocess.check_call(sudo(["rm", "-rf", workdir.get(None, False)]))
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--debug", action="store_true", help="Enable debug mode")
+    parser.add_argument("--base", default=None, help="Base URL contains dirs 'releases' 'snapshots'")
+    parser.add_argument("--workdir", default=None, help="Working directory to use(default:./work)")
+
+    subparsers = parser.add_subparsers()
+    # prepare subcommand
+    prepare_parser = subparsers.add_parser('prepare', help='Prepare profiles')
+    prepare_parser.add_argument('profile', nargs='*', default=[], help='Profiles to prepare')
+    prepare_parser.add_argument('--sync', action='store_true', help='Run emerge --sync before preparation')
+    prepare_parser.add_argument('--force-build', action='store_true', help='Force to execute build.sh')
+    prepare_parser.set_defaults(func=prepare)
+
+    # bash subcommand
+    bash_parser = subparsers.add_parser('bash', help='Run bash on a profile')
+    bash_parser.add_argument('profile', nargs='?', default='default', help='Profile to run bash')
+    bash_parser.set_defaults(func=bash)
+
+    # build subcommand
+    build_parser = subparsers.add_parser('build', help='Build artifacts')
+    build_parser.add_argument("artifact", default=[], nargs='*', help="Artifacts to build")
+    build_parser.set_defaults(func=build)
+
+    # run subcommand
+    run_parser = subparsers.add_parser('run', help='Run an artifact')
+    run_parser.add_argument('--bash', action='store_true', help='Run bash instead of spawning container')
+    run_parser.add_argument('artifact', nargs='?', default='default', help='Artifact to run')
+    run_parser.set_defaults(func=run)
+
+    # qemu subcommand
+    qemu_parser = subparsers.add_parser('qemu', help='Run an artifact using qemu')
+    qemu_parser.add_argument('artifact', nargs='?', default='default', help='Artifact to run')
+    qemu_parser.add_argument('--drm', action='store_true', help='Enable DRM(virgl) when running qemu')
+    qemu_parser.add_argument('--data-volume', action='store_true', help='Create data partition when running qemu')
+    qemu_parser.add_argument('--system-ini', help='system.ini file when running qemu')
+    qemu_parser.set_defaults(func=_qemu)
+
+    # clean subcommand
+    clean_parser = subparsers.add_parser('clean', help='Clean up artifacts')
+    clean_parser.add_argument('artifact', nargs='?', default='default', help='Artifact to clean')
+    clean_parser.set_defaults(func=clean)
+
+    args = parser.parse_args()
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG)
+        logging.debug("Debug mode enabled")
+
+    if args.base is not None: 
+        upstream.set_base_url(args.base)
+        print("Base URL set to %s" % args.base)
+    if args.workdir is not None:
+        workdir.set(args.workdir)
+        print("Working directory set to %s" % args.workdir)
+
+    if not hasattr(args, 'func'):
+        parser.print_help()
+        sys.exit(1)
+    #else
+    atexit.register(workdir.cleanup_trash)
+    args.func(args)
