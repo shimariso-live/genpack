@@ -1,5 +1,5 @@
 import os,subprocess,importlib.resources,glob
-import workdir,user_dir,upstream,arch
+import workdir,user_dir,upstream,arch,genpack_json
 import initlib,init,util
 from sudo import sudo,Tee
 
@@ -33,9 +33,14 @@ class Profile:
         with open(os.path.join(gentoo_dir, ".done"), "w") as f:
             pass
     def get_all_profiles():
+        profile_names = genpack_json.get("profiles", [])
+        if not isinstance(profile_names, list): raise Exception("profiles must be a list")
+        if len(profile_names) == 0:
+            for profile_name in os.listdir(os.path.join(".", "profiles")):
+                profile_names.append(profile_name)
         profiles = []
-        for profile in os.listdir(os.path.join(".", "profiles")):
-            profiles.append(Profile(profile))
+        for profile_name in profile_names:
+            profiles.append(Profile(profile_name))
         return profiles
 
 def lower_exec(lower_dir, cache_dir, portage_dir, cmdline, nspawn_opts=[]):

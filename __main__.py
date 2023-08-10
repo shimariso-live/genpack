@@ -131,6 +131,9 @@ if __name__ == "__main__":
         workdir.set(args.workdir)
         print("Working directory set to %s" % args.workdir)
 
+    import genpack_json
+    genpack_json.load()
+
     if not hasattr(args, 'func'):
         parser.print_help()
         sys.exit(1)

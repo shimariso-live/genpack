@@ -1,5 +1,5 @@
 import os,json,subprocess,re
-import workdir,arch,package,genpack_profile
+import workdir,arch,package,genpack_profile,genpack_json
 from sudo import sudo
 
 CONTAINER_NAME="genpack-artifact-%d" % os.getpid()
@@ -71,9 +71,14 @@ class Artifact:
         #else
         return os.path.getmtime(outfile) > self.get_build_time()
     def get_all_artifacts():
+        artifact_names = genpack_json.get("artifacts", [])
+        if not isinstance(artifact_names, list): raise Exception("artifacts must be list")
+        if len(artifact_names) == 0:
+            for i in os.listdir("./artifacts"):
+                if os.path.isdir(os.path.join("./artifacts", i)): artifact_names.append(i)
         artifacts = []
-        for i in os.listdir("./artifacts"):
-            if os.path.isdir(os.path.join("./artifacts", i)): artifacts.append(Artifact(i))
+        for artifact_name in artifact_names:
+            artifacts.append(Artifact(artifact_name))
         return artifacts
 
 def copy(gentoo_dir, upper_dir, files):
