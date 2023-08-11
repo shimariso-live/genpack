@@ -64,10 +64,11 @@ def extract_portage():
     _extract_portage_done = True
     with user_dir.portage_tarball() as portage_tarball:
         portage_dir = workdir.get_portage(False)
+        upstream.download_if_necessary(upstream.get_latest_portage_tarball_url(), portage_tarball)
         done_file = os.path.join(portage_dir, ".done")
-        if not upstream.download_if_necessary(upstream.get_latest_portage_tarball_url(), portage_tarball) and os.path.exists(done_file): return
+        if os.path.isfile(done_file) and os.stat(done_file).st_mtime > os.stat(portage_tarball).st_mtime: return
         #else
-        if os.path.exists(portage_dir): workdir.move_to_trash(portage_dir)
+        workdir.move_to_trash(portage_dir)
 
         print("Extracting portage into %s..." % portage_dir)
         os.makedirs(portage_dir)
