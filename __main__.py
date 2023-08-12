@@ -17,7 +17,7 @@ def prepare(args):
 
     for profile in profiles:
         print("Preparing profile %s..." % profile.name)
-        genpack_profile.prepare(profile, args.sync, args.force_build)
+        genpack_profile.prepare(profile, args.sync, "force" if args.force_build else True)
 
 def bash(args):
     profile = genpack_profile.Profile(args.profile)

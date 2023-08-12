@@ -126,7 +126,7 @@ def link_files(srcdir, dstdir):
     
     return newest_file
 
-def prepare(profile, sync = False, force_exec_build_sh = False):
+def prepare(profile, sync = False, build_sh = True):
     extract_portage()
     gentoo_dir = profile.get_gentoo_workdir()
     extract_stage3(gentoo_dir)
@@ -169,11 +169,13 @@ def prepare(profile, sync = False, force_exec_build_sh = False):
     portage_time = os.stat(os.path.join(portage_dir, "metadata/timestamp")).st_mtime
     newest_file = max(newest_file, portage_time)
 
-    if (not done_file_time or newest_file > done_file_time or sync or force_exec_build_sh):
+    if build_sh == "force" or (build_sh == True and (not done_file_time or newest_file > done_file_time or sync)):
         lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "-uDN", "-bk", "--binpkg-respect-use=y", 
-            "system", "nano", "gentoolkit", "pkgdev", 
+            "system", "nano", "gentoolkit", "pkgdev", "zip",
             "strace", "vim", "tcpdump", "netkit-telnetd"])
-        if os.path.isfile(os.path.join(gentoo_dir, "build.sh")):
+        if os.path.isfile(os.path.join(gentoo_dir, "prepare")):
+            lower_exec(gentoo_dir, cache_dir, portage_dir, ["/prepare"])
+        elif os.path.isfile(os.path.join(gentoo_dir, "build.sh")):
             lower_exec(gentoo_dir, cache_dir, portage_dir, ["/build.sh"])
         lower_exec(gentoo_dir, cache_dir, portage_dir, ["sh", "-c", "emerge -bk --binpkg-respect-use=y @preserved-rebuild && emerge --depclean && etc-update --automode -5 && eclean-dist -d && eclean-pkg -d"])
         profile.set_gentoo_workdir_time()
