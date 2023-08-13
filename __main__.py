@@ -17,7 +17,7 @@ def prepare(args):
 
     for profile in profiles:
         print("Preparing profile %s..." % profile.name)
-        genpack_profile.prepare(profile, args.sync, "force" if args.force_build else True)
+        genpack_profile.prepare(profile, args.sync, "force" if args.force_executing_prepare_script else True)
 
 def bash(args):
     profile = genpack_profile.Profile(args.profile)
@@ -87,7 +87,7 @@ if __name__ == "__main__":
     prepare_parser = subparsers.add_parser('prepare', help='Prepare profiles')
     prepare_parser.add_argument('profile', nargs='*', default=[], help='Profiles to prepare')
     prepare_parser.add_argument('--sync', action='store_true', help='Run emerge --sync before preparation')
-    prepare_parser.add_argument('--force-build', action='store_true', help='Force to execute build.sh')
+    prepare_parser.add_argument('--force-executing-prepare-script', action='store_true', help='Force to execute prepare script')
     prepare_parser.set_defaults(func=prepare)
 
     # bash subcommand
