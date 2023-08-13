@@ -211,11 +211,6 @@ def build(artifact):
                 "--capability=CAP_MKNOD",
                 "sh", "-c", "/pkgbuild && rm -f /pkgbuild" ]))
 
-    # enable services
-    services = ["sshd","systemd-networkd", "systemd-resolved"] + artifact.get_services()
-    #else
-    enable_services(upper_dir, services)
-
     # artifact specific setup
     newest_artifact_file = max(newest_pkg_file, sync_files(artifact.get_dir(), upper_dir))
     if os.path.isfile(os.path.join(upper_dir, "build")):
@@ -228,6 +223,9 @@ def build(artifact):
     else:
         print("Artifact build script not found.")
     subprocess.check_call(sudo(["rm", "-rf", os.path.join(upper_dir, "build"), os.path.join(upper_dir,"build.json"), os.path.join(upper_dir,"usr/src")]))
+
+    # enable services
+    enable_services(upper_dir, ["sshd","systemd-networkd", "systemd-resolved"] + artifact.get_services())
 
     # generate metadata
     genpack_metadata_dir = os.path.join(upper_dir, ".genpack")
