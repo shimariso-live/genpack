@@ -17,7 +17,13 @@ def prepare(args):
 
     for profile in profiles:
         print("Preparing profile %s..." % profile.name)
-        genpack_profile.prepare(profile, args.sync, "force" if args.force_executing_prepare_script else True)
+        try:
+            genpack_profile.prepare(profile, args.sync, "force" if args.force_executing_prepare_script else True)
+        except Exception as e:
+            if args.keep_going:
+                logging.error("Error occurred while preparing profile %s: %s" % (profile.name, str(e)))
+            else:
+                raise e
 
 def bash(args):
     profile = genpack_profile.Profile(args.profile)
@@ -43,14 +49,20 @@ def build(args):
         genpack_profile.prepare(profile)
 
     for artifact in artifacts:
-        if artifact.is_up_to_date():
-            print("Artifact %s is up-to-date" % artifact.name)
-        else:
-            print("Building artifact %s..." % artifact.name)
-            genpack_artifact.build(artifact)
-        if not artifact.is_outfile_up_to_date():
-            print("Packing artifact %s..." % artifact.name)
-            genpack_artifact.pack(artifact)
+        try:
+            if artifact.is_up_to_date():
+                print("Artifact %s is up-to-date" % artifact.name)
+            else:
+                print("Building artifact %s..." % artifact.name)
+                genpack_artifact.build(artifact)
+            if not artifact.is_outfile_up_to_date():
+                print("Packing artifact %s..." % artifact.name)
+                genpack_artifact.pack(artifact)
+        except Exception as e:
+            if args.keep_going:
+                logging.error("Error occurred while building artifact %s: %s" % (artifact.name, str(e)))
+            else:
+                raise e
 
     print("Done.")
     
@@ -88,6 +100,7 @@ if __name__ == "__main__":
     prepare_parser.add_argument('profile', nargs='*', default=[], help='Profiles to prepare')
     prepare_parser.add_argument('--sync', action='store_true', help='Run emerge --sync before preparation')
     prepare_parser.add_argument('--force-executing-prepare-script', action='store_true', help='Force to execute prepare script')
+    prepare_parser.add_argument('--keep-going', action='store_true', help='Keep going even if an error occurs')
     prepare_parser.set_defaults(func=prepare)
 
     # bash subcommand
@@ -98,6 +111,7 @@ if __name__ == "__main__":
     # build subcommand
     build_parser = subparsers.add_parser('build', help='Build artifacts')
     build_parser.add_argument("artifact", default=[], nargs='*', help="Artifacts to build")
+    build_parser.add_argument('--keep-going', action='store_true', help='Keep going even if an error occurs')
     build_parser.set_defaults(func=build)
 
     # run subcommand
