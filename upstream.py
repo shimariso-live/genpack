@@ -1,4 +1,4 @@
-import os,re,subprocess
+import os,re,subprocess,logging
 import arch
 
 _base_url = "http://ftp.iij.ad.jp/pub/linux/gentoo/"
@@ -37,19 +37,25 @@ def get_latest_portage_tarball_url():
 def get_content_length(url):
     import urllib.request
     req = urllib.request.Request(url, method="HEAD")
-    with urllib.request.urlopen(req) as f:
-        content_length = f.headers.get("Content-Length")
-        if content_length is not None:
-            content_length = int(content_length)
-            return content_length
+    try:
+        with urllib.request.urlopen(req) as f:
+            content_length = f.headers.get("Content-Length")
+            if content_length is not None:
+                content_length = int(content_length)
+                return content_length
+    except urllib.error.HTTPError as e:
+        logging.warning("HTTPError: %s", e)
+        return None
     #else
-    raise Exception("Failed to get Content-Length for %s" % url)
+    logging.warning("Failed to get Content-Length for %s", url)
+    return None
 
 def download_if_necessary(url, save_as):
     if (url,save_as) in _downloaded: return False
     _downloaded.add((url,save_as))
     if os.path.exists(save_as):
-        if os.path.getsize(save_as) == get_content_length(url):
+        content_length = get_content_length(url)
+        if content_length is None or os.path.getsize(save_as) == get_content_length(url):
             print("Skipping download of %s" % url)
             return False
     #else
