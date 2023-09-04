@@ -40,15 +40,27 @@ def build(args):
     if len(artifacts) == 0: artifact.append(genpack_artifact.Artifact("default"))
 
     profiles = set()
+    profiles_prepared = set()
 
     for artifact in artifacts:
         profiles.add(artifact.get_profile())
 
     for profile in profiles:
         print("Preparing profile %s..." % profile.name)
-        genpack_profile.prepare(profile)
+        try:
+            genpack_profile.prepare(profile)
+            profiles_prepared.add(profile)
+        except Exception as e:
+            if args.keep_going:
+                logging.error("Error occurred while preparing profile %s: %s" % (profile.name, str(e)))
+            else:
+                raise e
 
     for artifact in artifacts:
+        print("Building artifact %s..." % artifact.name)
+        if artifact.get_profile() not in profiles_prepared:
+            logging.warning("Profile %s is not prepared. Skipping %s." % (artifact.get_profile().name, artifact.name))
+            continue
         try:
             if artifact.is_up_to_date():
                 print("Artifact %s is up-to-date" % artifact.name)
