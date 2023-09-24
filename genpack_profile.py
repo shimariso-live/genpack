@@ -63,7 +63,7 @@ def extract_portage():
     if _extract_portage_done: return
     _extract_portage_done = True
     with user_dir.portage_tarball() as portage_tarball:
-        portage_dir = workdir.get_portage(False)
+        portage_dir = workdir.get_portage(True)
         upstream.download_if_necessary(upstream.get_latest_portage_tarball_url(), portage_tarball)
         done_file = os.path.join(portage_dir, ".done")
         if os.path.isfile(done_file) and os.stat(done_file).st_mtime > os.stat(portage_tarball).st_mtime: return
