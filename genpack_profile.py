@@ -42,6 +42,8 @@ class Profile:
         for profile_name in profile_names:
             profiles.append(Profile(profile_name))
         return profiles
+    def exists(profile_name):
+        return os.path.isdir(os.path.join(".", "profiles", profile_name))
 
 def lower_exec(lower_dir, cache_dir, portage_dir, cmdline, nspawn_opts=[]):
     subprocess.check_call(sudo(
@@ -127,11 +129,15 @@ def link_files(srcdir, dstdir):
     return newest_file
 
 def prepare(profile, sync = False, build_sh = True):
+    if profile.name[0] == '@': raise Exception("Profile name starts with @ is reserved")
     extract_portage()
     gentoo_dir = profile.get_gentoo_workdir()
     extract_stage3(gentoo_dir)
 
-    newest_file = link_files(profile.get_dir(), gentoo_dir)
+    common = Profile.exists("@common") and Profile("@common") or None
+    newest_file = 0
+    if common: newest_file = link_files(common.get_dir(), gentoo_dir)
+    newest_file = max(newest_file, link_files(profile.get_dir(), gentoo_dir))
     # remove irrelevant arch dependent settings
     for i in glob.glob(os.path.join(gentoo_dir, "etc/portage/package.*/arch-*")):
         if not i.endswith("-" + arch.get()) and os.path.isfile(i): os.unlink(i)
