@@ -20,14 +20,23 @@ def get_latest_stage3_tarball_url(variant = "systemd-mergedusr"):
     if _arch == "x86_64": _arch = _arch2 = "amd64"
     elif _arch == "i686": _arch = "x86"
     elif _arch == "aarch64": _arch = _arch2 = "arm64"
+    current_status = None
     for line in url_readlines(_base_url + "releases/" + _arch + "/autobuilds/latest-stage3-" + _arch2 + "-%s.txt" % (variant,)):
-        line = re.sub(r'#.*$', "", line.strip())
-        if line == "": continue
-        #else
-        splitted = line.split(" ")
-        if len(splitted) < 2: continue
-        #else
-        return _base_url + "releases/" + _arch + "/autobuilds/" + splitted[0]
+        if current_status is None:
+            if line == "-----BEGIN PGP SIGNED MESSAGE-----": current_status = "header"
+            continue
+        elif current_status == "header":
+            if line == "": current_status = "body"
+            continue
+        elif current_status == "body":
+            if line == "-----BEGIN PGP SIGNATURE-----": break
+            line = re.sub(r'#.*$', "", line.strip())
+            if line == "": continue
+            #else
+            splitted = line.split(" ")
+            if len(splitted) < 2: continue
+            #else
+            return _base_url + "releases/" + _arch + "/autobuilds/" + splitted[0]
     #else
     raise Exception("No stage3 tarball (arch=%s,variant=%s) found", arch.get(), variant)
 
@@ -65,8 +74,9 @@ def download_if_necessary(url, save_as):
     return True
 
 if __name__ == "__main__":
-    import user_dir
-    with user_dir.stage3_tarball() as stage3_tarball:
-        download_if_necessary(get_latest_stage3_tarball_url(), stage3_tarball)
-    with user_dir.portage_tarball() as portage_tarball:
-        download_if_necessary(get_latest_portage_tarball_url(), portage_tarball)
+    print(get_latest_stage3_tarball_url())
+    #import user_dir
+    #with user_dir.stage3_tarball() as stage3_tarball:
+    #    download_if_necessary(get_latest_stage3_tarball_url(), stage3_tarball)
+    #with user_dir.portage_tarball() as portage_tarball:
+    #    download_if_necessary(get_latest_portage_tarball_url(), portage_tarball)
