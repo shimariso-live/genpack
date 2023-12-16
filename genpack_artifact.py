@@ -225,7 +225,7 @@ def build(artifact):
     subprocess.check_call(sudo(["rm", "-rf", os.path.join(upper_dir, "build"), os.path.join(upper_dir,"build.json"), os.path.join(upper_dir,"usr/src")]))
 
     # enable services
-    enable_services(upper_dir, ["sshd","systemd-networkd", "systemd-resolved"] + artifact.get_services())
+    enable_services(upper_dir, ["sshd","systemd-networkd", "systemd-resolved", "systemd-timesyncd"] + artifact.get_services())
 
     # generate metadata
     genpack_metadata_dir = os.path.join(upper_dir, ".genpack")
