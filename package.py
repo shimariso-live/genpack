@@ -112,13 +112,14 @@ def scan_pkg_dep(gentoo_dir, pkg_map, pkgnames, pkgs = None):
             if cat_pn in pkgs: continue # already exists
 
             pkgs.add(cat_pn) # add self
-            rdepend_file = os.path.join(gentoo_dir, "var/db/pkg", cat_pn, "RDEPEND")
-            if os.path.isfile(rdepend_file):
-                with open(rdepend_file) as f:
-                    line = f.read().strip()
-                    if len(line) > 0:
-                        rdepend_pkgnames = parse_rdepend_line(line)
-                        if len(rdepend_pkgnames) > 0: scan_pkg_dep(gentoo_dir, pkg_map, rdepend_pkgnames, pkgs)
+            for depend_type in ["RDEPEND", "PDEPEND"]:
+                depend_file = os.path.join(gentoo_dir, "var/db/pkg", cat_pn, depend_type)
+                if os.path.isfile(depend_file):
+                    with open(depend_file) as f:
+                        line = f.read().strip()
+                        if len(line) > 0:
+                            rdepend_pkgnames = parse_rdepend_line(line)
+                            if len(rdepend_pkgnames) > 0: scan_pkg_dep(gentoo_dir, pkg_map, rdepend_pkgnames, pkgs)
 
     return pkgs
 
@@ -154,3 +155,32 @@ def get_all_files_of_all_packages(root_dir, pkgs, devel = False):
                     file_to_append = re.sub(r' -> .+$', "", line[4:])
                 if file_to_append is not None and not is_path_excluded(file_to_append, devel): files.append(file_to_append)
     return files
+
+_v = r"(\d+)((\.\d+)*)([a-z]?)((_(pre|p|beta|alpha|rc)\d*)*)"
+_rev = r"\d+"
+_pv_re = re.compile(r"^" 
+    "(?P<pn>"
+    + r"[\w+][\w+-]*?"
+    + "(?P<pn_inval>-"
+    + _v + "(-r(" + _rev + "))?"
+    + ")?)"
+    + "-(?P<ver>"
+    + _v
+    + ")(-r(?P<rev>"
+    + _rev
+    + "))?"
+    + r"$", re.VERBOSE | re.UNICODE)
+
+def _pkgsplit(mypkg):
+    """
+    @param mypkg: pv
+    @return:
+    1. None if input is invalid.
+    2. (pn, ver, rev) if input is pv
+    """
+    m = _pv_re.match(mypkg)
+    if m is None or m.group("pn_inval") is not None: return None
+    #else
+    rev = m.group("rev")
+
+    return (m.group("pn"), m.group("ver"), "r" + (0 if rev is None else rev))
