@@ -142,8 +142,9 @@ def make_ld_so_conf_latest(root_dir):
 def create_default_iptables_rules(root_dir):
     subprocess.check_call(sudo(["touch", os.path.join(root_dir, "var/lib/iptables/rules-save"), os.path.join(root_dir, "var/lib/ip6tables/rules-save")]))
 
-def set_locale_to_envvar(root_dir):
-    subprocess.check_call(sudo(["sed", "-i", r"s/^export LANG=.\+$/\[ -f \/etc\/locale\.conf \] \&\& . \/etc\/locale.conf \&\& export LANG/", os.path.join(root_dir, "etc/profile.env") ]))
+def set_locale_conf_to_pam_env(root_dir):
+    subprocess.check_call(sudo(["sed", "-i", r"s/^export LANG=\(.*\)$/#export LANG=\1 # apply \/etc\/locale.conf instead/", os.path.join(root_dir, "etc/profile.env") ]))
+    subprocess.check_call(sudo(["sed", "-i", r"/^session\t\+required\t\+pam_env\.so envfile=\/etc\/profile\.env$/a session\t\trequired\tpam_env.so envfile=\/etc\/locale.conf", os.path.join(root_dir, "etc/pam.d/system-login") ]))
 
 def enable_services(root_dir, services):
     if not isinstance(services, list): services = [services]
@@ -193,7 +194,7 @@ def build(artifact):
     remove_root_password(upper_dir)
     make_ld_so_conf_latest(upper_dir)
     create_default_iptables_rules(upper_dir)
-    set_locale_to_envvar(upper_dir)
+    set_locale_conf_to_pam_env(upper_dir)
 
     # per-package setup
     newest_pkg_file = 0
