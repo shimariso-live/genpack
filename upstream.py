@@ -1,8 +1,9 @@
-import os,re,subprocess,logging
+import os,re,subprocess,logging,urllib.request,urllib.error
 import arch
 
 _base_url = "http://ftp.iij.ad.jp/pub/linux/gentoo/"
 _downloaded = set()
+USER_AGENT = "genpack/0.1"
 
 def set_base_url(base_url):
     global _base_url
@@ -10,8 +11,8 @@ def set_base_url(base_url):
     if not _base_url.endswith('/'): base_url += '/'
 
 def url_readlines(url):
-    import urllib.request
-    with urllib.request.urlopen(url) as f:
+    req = urllib.request.Request(url, headers={'User-Agent': USER_AGENT})
+    with urllib.request.urlopen(req) as f:
         return f.read().decode('utf-8').splitlines()
 
 def get_latest_stage3_tarball_url(variant = "systemd-mergedusr"):
@@ -44,8 +45,7 @@ def get_latest_portage_tarball_url():
     return _base_url + "snapshots/portage-latest.tar.xz"
 
 def get_content_length(url):
-    import urllib.request
-    req = urllib.request.Request(url, method="HEAD")
+    req = urllib.request.Request(url, method="HEAD", headers={'User-Agent': USER_AGENT})
     try:
         with urllib.request.urlopen(req) as f:
             content_length = f.headers.get("Content-Length")
