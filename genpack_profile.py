@@ -178,6 +178,7 @@ def prepare(profile, sync = False, build_sh = True):
     newest_file = max(newest_file, portage_time)
 
     if build_sh == "force" or (build_sh == True and (not done_file_time or newest_file > done_file_time or sync)):
+        lower_exec(gentoo_dir, cache_dir, portage_dir, ["emaint", "binhost", "--fix"])
         lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "-uDN", "-bk", "--binpkg-respect-use=y", 
             "system", "nano", "gentoolkit", "pkgdev", "zip",
             "strace", "vim", "tcpdump", "netkit-telnetd"])
