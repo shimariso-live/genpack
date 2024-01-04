@@ -39,6 +39,12 @@ def build(args):
     
     if len(artifacts) == 0: artifact.append(genpack_artifact.Artifact("default"))
 
+    if args.variant is not None:
+        if len(artifacts) > 1:
+            raise Exception("Cannot specify variant when building multiple artifacts")
+        else:
+            artifacts[0].set_active_variant(args.variant)
+
     profiles = set()
     profiles_prepared = set()
 
@@ -57,7 +63,6 @@ def build(args):
                 raise e
 
     for artifact in artifacts:
-        print("Building artifact %s..." % artifact.name)
         if artifact.get_profile() not in profiles_prepared:
             logging.warning("Profile %s is not prepared. Skipping %s." % (artifact.get_profile().name, artifact.name))
             continue
@@ -80,6 +85,7 @@ def build(args):
     
 def run(args):
     artifact = genpack_artifact.Artifact(args.artifact)
+    if args.variant is not None: artifact.set_active_variant(args.variant)
 
     if not artifact.is_up_to_date():
         print("Artifact %s is not up-to-date" % artifact.name)
@@ -93,6 +99,7 @@ def run(args):
 
 def _qemu(args):
     artifact = genpack_artifact.Artifact(args.artifact)
+    if args.variant is not None: artifact.set_active_variant(args.variant)
     outfile = artifact.get_outfile()
     qemu.run(outfile, os.path.join(args.workdir, "qemu.img"), args.drm, args.data_volume, args.system_ini)
 
@@ -124,17 +131,20 @@ if __name__ == "__main__":
     build_parser = subparsers.add_parser('build', help='Build artifacts')
     build_parser.add_argument("artifact", default=[], nargs='*', help="Artifacts to build")
     build_parser.add_argument('--keep-going', action='store_true', help='Keep going even if an error occurs')
+    build_parser.add_argument('--variant', default=None, help='Variant to build')
     build_parser.set_defaults(func=build)
 
     # run subcommand
     run_parser = subparsers.add_parser('run', help='Run an artifact')
     run_parser.add_argument('--bash', action='store_true', help='Run bash instead of spawning container')
     run_parser.add_argument('artifact', nargs='?', default='default', help='Artifact to run')
+    run_parser.add_argument('--variant', default=None, help='Variant to run')
     run_parser.set_defaults(func=run)
 
     # qemu subcommand
     qemu_parser = subparsers.add_parser('qemu', help='Run an artifact using qemu')
     qemu_parser.add_argument('artifact', nargs='?', default='default', help='Artifact to run')
+    qemu_parser.add_argument('--variant', default=None, help='Variant to run')
     qemu_parser.add_argument('--drm', action='store_true', help='Enable DRM(virgl) when running qemu')
     qemu_parser.add_argument('--data-volume', action='store_true', help='Create data partition when running qemu')
     qemu_parser.add_argument('--system-ini', help='system.ini file when running qemu')

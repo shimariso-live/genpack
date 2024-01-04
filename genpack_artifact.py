@@ -8,6 +8,7 @@ class Artifact:
     def __init__(self, artifact):
         self.name = artifact
         self.artifact_dir = os.path.join(".", "artifacts", artifact)
+        self.active_variant = None
         if not os.path.isdir(self.artifact_dir):
             raise Exception("No such artifact: %s" % artifact)
         #else
@@ -19,11 +20,15 @@ class Artifact:
     def get_dir(self):
         return self.artifact_dir
     def get_workdir(self):
-        return workdir.get_artifact(self.name, None, False)
+        name_and_variant = self.name if self.active_variant is None else "%s:%s" % (self.name, self.active_variant)
+        return workdir.get_artifact(name_and_variant, None, False)
     def lookup_build_json(self, key, default_value):
-        if self.build_json is None or key not in self.build_json: return default_value
+        if self.build_json is None: return default_value
         #else
-        return self.build_json[key]
+        if self.active_variant is not None and "variants" in self.build_json and self.active_variant in self.build_json["variants"] and key in self.build_json["variants"][self.active_variant]:
+            return self.build_json["variants"][self.active_variant][key]
+        #else
+        return self.build_json[key] if key in self.build_json else default_value
     def get_packages(self):
         packages = self.lookup_build_json("packages", [])
         if not isinstance(packages, list): raise Exception("packages must be list")
@@ -42,7 +47,10 @@ class Artifact:
     def is_devel(self):
         return self.lookup_build_json("devel", False)
     def get_outfile(self, default_value = None):
-        return self.lookup_build_json("outfile", default_value if default_value is not None else "%s-%s.squashfs" % (self.name, arch.get()))
+        if default_value is None:
+            if self.active_variant is not None: default_value = "%s:%s-%s.squashfs" % (self.name, self.active_variant, arch.get())
+            else: default_value = "%s-%s.squashfs" % (self.name, arch.get())
+        return self.lookup_build_json("outfile", default_value)
     def get_compression(self, default_value = "gzip"):
         return self.lookup_build_json("compression", default_value)
     def get_profile(self, default_profile_name = "default"):
@@ -80,6 +88,14 @@ class Artifact:
         for artifact_name in artifact_names:
             artifacts.append(Artifact(artifact_name))
         return artifacts
+    def set_active_variant(self, variant):
+        self.active_variant = variant
+    def get_active_variant(self):
+        return self.active_variant
+
+def escape_colon(s):
+    # systemd-nspaws' some options need colon to be escaped
+    return re.sub(r':', r'\:', s)
 
 def copy(gentoo_dir, upper_dir, files):
     if not gentoo_dir.endswith('/'): gentoo_dir += '/'
@@ -131,7 +147,7 @@ def sync_files(srcdir, dstdir, exclude=None):
     return newest_file
 
 def copyup_gcc_libs(gentoo_dir, upper_dir):
-    subprocess.check_call(sudo(["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", gentoo_dir, "--overlay=+/:%s:/" % os.path.abspath(upper_dir), "sh", "-c", "touch -h `gcc --print-file-name=`/*.so.* && ldconfig" ]))
+    subprocess.check_call(sudo(["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", gentoo_dir, "--overlay=+/:%s:/" % escape_colon(os.path.abspath(upper_dir)), "sh", "-c", "touch -h `gcc --print-file-name=`/*.so.* && ldconfig" ]))
 
 def remove_root_password(root_dir):
     subprocess.check_call(sudo(["sed", "-i", r"s/^root:\*:/root::/", os.path.join(root_dir, "etc/shadow") ]))
@@ -196,6 +212,9 @@ def build(artifact):
     create_default_iptables_rules(upper_dir)
     set_locale_conf_to_pam_env(upper_dir)
 
+    variant = artifact.get_active_variant()
+    variant_args = ["-E", "VARIANT=%s" % variant] if variant is not None else []
+
     # per-package setup
     newest_pkg_file = 0
     for pkg in pkgs:
@@ -206,9 +225,9 @@ def build(artifact):
         print("Processing package %s..." % pkg_wo_ver)
         newest_pkg_file = max(newest_pkg_file, sync_files(package_dir, upper_dir, r"^CONTENTS(\.|$)"))
         if os.path.isfile(os.path.join(upper_dir, "pkgbuild")):
-            subprocess.check_call(sudo(["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", gentoo_dir, "--overlay=+/:%s:/" % os.path.abspath(upper_dir), 
+            subprocess.check_call(sudo(["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", gentoo_dir, "--overlay=+/:%s:/" % escape_colon(os.path.abspath(upper_dir)), 
                 "--bind=%s:/var/cache" % os.path.abspath(cache_dir),
-                "-E", "PROFILE=%s" % profile.name, "-E", "ARTIFACT=%s" % artifact.name, 
+                "-E", "PROFILE=%s" % profile.name, "-E", "ARTIFACT=%s" % artifact.name] + variant_args + [
                 "--capability=CAP_MKNOD",
                 "sh", "-c", "/pkgbuild && rm -f /pkgbuild" ]))
 
@@ -217,9 +236,9 @@ def build(artifact):
     if os.path.isfile(os.path.join(upper_dir, "build")):
         print("Building artifact...")
         subprocess.check_call(sudo(["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", gentoo_dir, 
-            "--overlay=+/:%s:/" % os.path.abspath(upper_dir), 
+            "--overlay=+/:%s:/" % escape_colon(os.path.abspath(upper_dir)), 
             "--bind=%s:/var/cache" % os.path.abspath(cache_dir),
-            "-E", "PROFILE=%s" % profile.name, "-E", "ARTIFACT=%s" % artifact.name, 
+            "-E", "PROFILE=%s" % profile.name, "-E", "ARTIFACT=%s" % artifact.name] + variant_args + [
             "/build" ]))
     else:
         print("Artifact build script not found.")
@@ -236,6 +255,9 @@ def build(artifact):
         f.write(profile.name)
     with open(os.path.join(genpack_metadata_dir, "artifact"), "w") as f:
         f.write(artifact.name)
+    if variant is not None:
+        with open(os.path.join(genpack_metadata_dir, "variant"), "w") as f:
+            f.write(variant)
     with open(os.path.join(genpack_metadata_dir, "packages"), "w") as f:
         for pkg in pkgs:
             if pkg[0] != '@': f.write(pkg + '\n')
