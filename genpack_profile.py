@@ -67,8 +67,18 @@ def extract_portage():
     with user_dir.portage_tarball() as portage_tarball:
         portage_dir = workdir.get_portage(True)
         upstream.download_if_necessary(upstream.get_latest_portage_tarball_url(), portage_tarball)
+
+        # if portage is up-to-date, do nothing
         done_file = os.path.join(portage_dir, ".done")
-        if os.path.isfile(done_file) and os.stat(done_file).st_mtime > os.stat(portage_tarball).st_mtime: return
+        last_time_timestamp = 0
+        if os.path.isfile(done_file):
+            try:
+                with open(done_file, "r") as f:
+                    last_time_timestamp = float(f.read())
+            except ValueError:
+                os.unlink(done_file)
+        tarball_timestamp = os.stat(portage_tarball).st_mtime
+        if tarball_timestamp <= last_time_timestamp: return
         #else
         workdir.move_to_trash(portage_dir)
 
@@ -76,7 +86,7 @@ def extract_portage():
         os.makedirs(portage_dir)
         subprocess.check_call(sudo(["tar", "xpf", portage_tarball, "--strip-components=1", "-C", portage_dir]))
         with open(done_file, "w") as f:
-            pass
+            f.write(str(tarball_timestamp))
 
 def extract_stage3(root_dir, variant = "systemd-mergedusr"):
     stage3_done_file = os.path.join(root_dir, ".stage3-done")
