@@ -276,7 +276,9 @@ def build(artifact):
             f.write(variant)
     with open(os.path.join(genpack_metadata_dir, "packages"), "w") as f:
         for pkg in pkgs:
-            if pkg[0] != '@': f.write(pkg + '\n')
+            if pkg[0] == '@': continue # skip package set
+            #else
+            f.write(pkg + '\n')
             if pkg in pkgs_with_deps:
                 if "NEEDED_BY" in pkgs_with_deps[pkg]:
                     f.write("# NEEDED_BY: " + (' '.join(pkgs_with_deps[pkg]["NEEDED_BY"])) + '\n')
