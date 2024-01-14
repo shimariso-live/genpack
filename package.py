@@ -72,7 +72,7 @@ def split_rdepend(line):
     #else
     return (splitted[0], splitted[1])
 
-def parse_rdepend_line(line, make_optional=False):
+def parse_rdepend_line(line, make_optional=False) -> set:
     p = []
     while line is not None and line.strip() != "":
         splitted = split_rdepend(line)
@@ -92,12 +92,12 @@ def parse_rdepend_line(line, make_optional=False):
         pkgs.add('?' + pkg_stripped if make_optional else pkg_stripped)
     return pkgs
 
-def scan_pkg_dep(gentoo_dir, pkg_map, pkgnames, pkgs = None):
-    if pkgs is None: pkgs = set()
+def scan_pkg_dep(gentoo_dir, pkg_map, pkgnames, masked_packages, pkgs = None, needed_by = None):
+    if pkgs is None: pkgs = dict()
     for pkgname in pkgnames:
         if pkgname[0] == '@':
-            pkgs.add(pkgname)
-            scan_pkg_dep(gentoo_dir, pkg_map, get_package_set(gentoo_dir, pkgname[1:]), pkgs)
+            pkgs[pkgname] = {"NEEDED_BY": set() if needed_by is None else {needed_by}}
+            scan_pkg_dep(gentoo_dir, pkg_map, get_package_set(gentoo_dir, pkgname[1:]), masked_packages, pkgs, pkgname)
             continue
         optional = False
         if pkgname[0] == '?': 
@@ -109,17 +109,32 @@ def scan_pkg_dep(gentoo_dir, pkg_map, pkgnames, pkgs = None):
         #else
         for cat_pn in pkg_map[pkgname]:
             cat_pn_wo_ver = strip_ver(cat_pn)
-            if cat_pn in pkgs: continue # already exists
+            if cat_pn in pkgs: # already exists
+                if needed_by is not None: pkgs[cat_pn]["NEEDED_BY"].add(needed_by)
+                continue 
 
-            pkgs.add(cat_pn) # add self
+            pkgs[cat_pn] = {"NEEDED_BY": set() if needed_by is None else {needed_by}} # add self
+
+            pkg_property_files = ["DESCRIPTION", "USE", "HOMEPAGE", "LICENSE"]
+            for prop in pkg_property_files:
+                prop_file = os.path.join(gentoo_dir, "var/db/pkg", cat_pn, prop)
+                if os.path.isfile(prop_file):
+                    with open(prop_file) as f:
+                        line = f.read().strip()
+                        if len(line) > 0:
+                            pkgs[cat_pn][prop] = line.replace("\n", " ")            
+
             for depend_type in ["RDEPEND", "PDEPEND"]:
                 depend_file = os.path.join(gentoo_dir, "var/db/pkg", cat_pn, depend_type)
                 if os.path.isfile(depend_file):
                     with open(depend_file) as f:
                         line = f.read().strip()
                         if len(line) > 0:
-                            rdepend_pkgnames = parse_rdepend_line(line)
-                            if len(rdepend_pkgnames) > 0: scan_pkg_dep(gentoo_dir, pkg_map, rdepend_pkgnames, pkgs)
+                            rpdepend_pkgnames = parse_rdepend_line(line)
+                            if depend_type == "PDEPEND" and masked_packages is not None:
+                                rpdepend_pkgnames.difference_update(set(masked_packages))
+                            if len(rpdepend_pkgnames) > 0: 
+                                scan_pkg_dep(gentoo_dir, pkg_map, rpdepend_pkgnames, masked_packages, pkgs, pkgname)
 
     return pkgs
 

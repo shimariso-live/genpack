@@ -166,6 +166,18 @@ def enable_services(root_dir, services):
     if not isinstance(services, list): services = [services]
     subprocess.check_call(sudo(["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", root_dir, "systemctl", "enable"] + services))
 
+def get_masked_packages(gentoo_dir) -> set:
+    masked_packages = set()
+    genpack_mask_file = os.path.join(gentoo_dir, "etc/portage/genpack.mask")
+    if not os.path.isfile(genpack_mask_file): return masked_packages
+    with open(genpack_mask_file) as f:
+        for line in f:
+            line = re.sub(r'#.*', "", line).strip()
+            if line == "": continue
+            #else
+            masked_packages.add(line)
+    return masked_packages
+
 def build(artifact):
     upper_dir = artifact.get_workdir()
     workdir.move_to_trash(upper_dir, True)
@@ -181,7 +193,11 @@ def build(artifact):
     gentoo_dir = profile.get_gentoo_workdir()
     cache_dir = profile.get_cache_workdir()
     pkg_map = package.collect_packages(gentoo_dir)
-    pkgs = package.scan_pkg_dep(gentoo_dir, pkg_map, artifact_pkgs)
+
+    masked_packages = get_masked_packages(gentoo_dir)
+
+    pkgs_with_deps = package.scan_pkg_dep(gentoo_dir, pkg_map, artifact_pkgs, masked_packages)
+    pkgs = sorted(pkgs_with_deps.keys())
 
     if os.path.islink(os.path.join(gentoo_dir, "bin")):
         print("System looks containing merged /usr.")
@@ -261,6 +277,14 @@ def build(artifact):
     with open(os.path.join(genpack_metadata_dir, "packages"), "w") as f:
         for pkg in pkgs:
             if pkg[0] != '@': f.write(pkg + '\n')
+            if pkg in pkgs_with_deps:
+                if "NEEDED_BY" in pkgs_with_deps[pkg]:
+                    f.write("# NEEDED_BY: " + (' '.join(pkgs_with_deps[pkg]["NEEDED_BY"])) + '\n')
+                pkg_properties = ["DESCRIPTION", "USE", "HOMEPAGE", "LICENSE"]
+                for prop in pkg_properties:
+                    if prop in pkgs_with_deps[pkg]:
+                        f.write("# " + prop + ": " + pkgs_with_deps[pkg][prop] + '\n')
+            f.write('\n')
     subprocess.check_call(sudo(["chown", "-R", "root:root", genpack_metadata_dir]))
     subprocess.check_call(sudo(["chmod", "755", genpack_metadata_dir]))
 
