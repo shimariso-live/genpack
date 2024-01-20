@@ -191,7 +191,7 @@ def prepare(profile, sync = False, build_sh = True):
         lower_exec(gentoo_dir, cache_dir, portage_dir, ["emaint", "binhost", "--fix"])
         lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "-uDN", "-bk", "--binpkg-respect-use=y", 
             "system", "nano", "gentoolkit", "pkgdev", "zip",
-            "strace", "vim", "tcpdump", "netkit-telnetd"])
+            "dev-debug/strace", "vim", "tcpdump", "netkit-telnetd"])
         if os.path.isfile(os.path.join(gentoo_dir, "prepare")):
             lower_exec(gentoo_dir, cache_dir, portage_dir, ["/prepare"])
         elif os.path.isfile(os.path.join(gentoo_dir, "build.sh")):
