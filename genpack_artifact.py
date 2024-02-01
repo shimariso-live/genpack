@@ -1,4 +1,4 @@
-import os,json,subprocess,re
+import os,json,subprocess,re,shutil
 import workdir,arch,package,genpack_profile,genpack_json
 from sudo import sudo
 
@@ -267,6 +267,8 @@ def build(artifact):
     genpack_metadata_dir = os.path.join(upper_dir, ".genpack")
     subprocess.check_call(sudo(["mkdir", "-p", genpack_metadata_dir]))
     subprocess.check_call(sudo(["chmod", "o+rwx", genpack_metadata_dir]))
+    with open(os.path.join(genpack_metadata_dir, "arch"), "w") as f:
+        f.write(arch.get())
     with open(os.path.join(genpack_metadata_dir, "profile"), "w") as f:
         f.write(profile.name)
     with open(os.path.join(genpack_metadata_dir, "artifact"), "w") as f:
@@ -274,6 +276,8 @@ def build(artifact):
     if variant is not None:
         with open(os.path.join(genpack_metadata_dir, "variant"), "w") as f:
             f.write(variant)
+    portage_dir = workdir.get_portage(False)
+    shutil.copy2(os.path.join(portage_dir, "metadata/timestamp.commit"), os.path.join(genpack_metadata_dir, "timestamp.commit"))
     with open(os.path.join(genpack_metadata_dir, "packages"), "w") as f:
         for pkg in pkgs:
             if pkg[0] == '@': continue # skip package set
