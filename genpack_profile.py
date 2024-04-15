@@ -88,7 +88,7 @@ def extract_portage():
         with open(done_file, "w") as f:
             f.write(str(tarball_timestamp))
 
-def extract_stage3(root_dir, variant = "systemd-mergedusr"):
+def extract_stage3(root_dir, variant = "systemd"):
     stage3_done_file = os.path.join(root_dir, ".stage3-done")
     with user_dir.stage3_tarball(variant) as stage3_tarball:
         upstream.download_if_necessary(upstream.get_latest_stage3_tarball_url(variant), stage3_tarball)
