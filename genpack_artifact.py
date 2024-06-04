@@ -1,5 +1,5 @@
 import os,json,subprocess,re,shutil
-import workdir,arch,package,genpack_profile,genpack_json
+import workdir,arch,package,genpack_profile,genpack_json,env
 from sudo import sudo
 
 CONTAINER_NAME="genpack-artifact-%d" % os.getpid()
@@ -243,9 +243,9 @@ def build(artifact):
         if os.path.isfile(os.path.join(upper_dir, "pkgbuild")):
             subprocess.check_call(sudo(["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", gentoo_dir, "--overlay=+/:%s:/" % escape_colon(os.path.abspath(upper_dir)), 
                 "--bind=%s:/var/cache" % os.path.abspath(cache_dir),
-                "-E", "PROFILE=%s" % profile.name, "-E", "ARTIFACT=%s" % artifact.name] + variant_args + [
-                "--capability=CAP_MKNOD",
-                "sh", "-c", "/pkgbuild && rm -f /pkgbuild" ]))
+                "-E", "PROFILE=%s" % profile.name, "-E", "ARTIFACT=%s" % artifact.name] + variant_args 
+                + env.get_as_systemd_nspawn_args()
+                + [ "--capability=CAP_MKNOD", "sh", "-c", "/pkgbuild && rm -f /pkgbuild" ]))
 
     # artifact specific setup
     newest_artifact_file = max(newest_pkg_file, sync_files(artifact.get_dir(), upper_dir))
@@ -254,8 +254,9 @@ def build(artifact):
         subprocess.check_call(sudo(["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", gentoo_dir, 
             "--overlay=+/:%s:/" % escape_colon(os.path.abspath(upper_dir)), 
             "--bind=%s:/var/cache" % os.path.abspath(cache_dir),
-            "-E", "PROFILE=%s" % profile.name, "-E", "ARTIFACT=%s" % artifact.name] + variant_args + [
-            "/build" ]))
+            "-E", "PROFILE=%s" % profile.name, "-E", "ARTIFACT=%s" % artifact.name] + variant_args 
+            + env.get_as_systemd_nspawn_args()
+            + [ "/build" ]))
     else:
         print("Artifact build script not found.")
     subprocess.check_call(sudo(["rm", "-rf", os.path.join(upper_dir, "build"), os.path.join(upper_dir,"build.json"), os.path.join(upper_dir,"usr/src")]))

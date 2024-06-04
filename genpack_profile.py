@@ -1,5 +1,5 @@
 import os,subprocess,importlib.resources,glob
-import workdir,user_dir,upstream,arch,genpack_json
+import workdir,user_dir,upstream,arch,genpack_json,env
 import initlib,init,util
 from sudo import sudo,Tee
 
@@ -51,6 +51,7 @@ def lower_exec(lower_dir, cache_dir, portage_dir, cmdline, nspawn_opts=[]):
             "--bind=%s:/var/cache" % os.path.abspath(cache_dir),
             "--capability=CAP_MKNOD,CAP_SYS_ADMIN",
             "--bind-ro=%s:/var/db/repos/gentoo" % os.path.abspath(portage_dir) ]
+            + env.get_as_systemd_nspawn_args()
             + nspawn_opts + cmdline)
     )
 

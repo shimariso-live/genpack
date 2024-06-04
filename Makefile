@@ -1,7 +1,7 @@
 all: genpack genpack-install
 
 genpack.zip: __main__.py qemu.py sudo.py arch.py genpack_profile.py genpack_artifact.py package.py \
-		upstream.py user_dir.py workdir.py genpack_json.py \
+		upstream.py user_dir.py workdir.py genpack_json.py env.py \
 		initlib/__init__.py initlib/initlib.cpp initlib/initlib.h initlib/fat.cpp initlib/fat.h \
 		init/__init__.py init/init.cpp init/init.h init/init-systemimg.cpp init/init-paravirt.cpp \
 		util/__init__.py util/install-system-image util/expand-rw-layer util/do-with-lvm-snapshot util/build-kernel.py \

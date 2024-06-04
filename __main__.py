@@ -3,7 +3,7 @@
 # https://github.com/wbrxcorp/genpack/blob/main/LICENSE
 
 import os,sys,subprocess,atexit,logging
-import upstream,workdir,genpack_profile,genpack_artifact,qemu
+import upstream,workdir,genpack_profile,genpack_artifact,qemu,env
 from sudo import sudo
 
 def prepare(args):
@@ -92,7 +92,8 @@ def run(args):
         sys.exit(1)
 
     print("Pressing ']' 3 times will exit the container and return to the host.")
-    cmdline = ["systemd-nspawn", "--suppress-sync=true", "-M", "genpack-run-%d" % os.getpid(), "-q", "-D", artifact.get_workdir(), "--network-veth"]
+    cmdline = ["systemd-nspawn", "--suppress-sync=true", "-M", "genpack-run-%d" % os.getpid(), 
+            "-q", "-D", artifact.get_workdir(), "--network-veth"] + env.get_as_systemd_nspawn_args()
     if args.bash: cmdline.append("/bin/bash")
     else: cmdline.append("-b")
     subprocess.call(sudo(cmdline))
@@ -112,6 +113,7 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
     parser.add_argument("--base", default=None, help="Base URL contains dirs 'releases' 'snapshots'")
     parser.add_argument("--workdir", default=None, help="Working directory to use(default:./work)")
+    parser.add_argument("--env", default=None, help="Environment variable in NAME=VALUE format (comma separated)")
 
     subparsers = parser.add_subparsers()
     # prepare subcommand
@@ -166,6 +168,12 @@ if __name__ == "__main__":
     if args.workdir is not None:
         workdir.set(args.workdir)
         print("Working directory set to %s" % args.workdir)
+    
+    if args.env is not None:
+        for e in args.env.split(","):
+            name, value = e.split("=")
+            env.set(name, value)
+            print("Environment variable %s set to %s" % (name, value))
 
     import genpack_json
     genpack_json.load()
