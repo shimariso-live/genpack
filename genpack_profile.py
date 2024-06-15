@@ -191,8 +191,11 @@ def prepare(profile, sync = False, build_sh = True):
     if build_sh == "force" or (build_sh == True and (not done_file_time or newest_file > done_file_time or sync)):
         lower_exec(gentoo_dir, cache_dir, portage_dir, ["emaint", "binhost", "--fix"])
         lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "-uDN", "-bk", "--binpkg-respect-use=y", 
-            "system", "nano", "gentoolkit", "pkgdev", "zip",
+            "system", "nano", "gentoolkit", "pkgdev", "zip", 
             "dev-debug/strace", "vim", "tcpdump", "netkit-telnetd"])
+        # genpack-progs now needs argparse
+        lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "-u1", "-bk", "--binpkg-respect-use=y", 
+            "dev-cpp/argparse"], nspawn_opts=["--setenv=ACCEPT_KEYWORDS=~*"])
         if os.path.isfile(os.path.join(gentoo_dir, "prepare")):
             lower_exec(gentoo_dir, cache_dir, portage_dir, ["/prepare"])
         elif os.path.isfile(os.path.join(gentoo_dir, "build.sh")):
