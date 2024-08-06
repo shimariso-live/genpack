@@ -15,12 +15,15 @@ def url_readlines(url):
     with urllib.request.urlopen(req) as f:
         return f.read().decode('utf-8').splitlines()
 
-def get_latest_stage3_tarball_url(variant = "systemd-mergedusr"):
+def get_latest_stage3_tarball_url(variant = "systemd"):
     _arch = arch.get()
     _arch2 = arch.get()
     if _arch == "x86_64": _arch = _arch2 = "amd64"
     elif _arch == "i686": _arch = "x86"
     elif _arch == "aarch64": _arch = _arch2 = "arm64"
+    elif _arch == "riscv64":
+        _arch = "riscv"
+        _arch2 = "rv64_lp64d"
     current_status = None
     for line in url_readlines(_base_url + "releases/" + _arch + "/autobuilds/latest-stage3-" + _arch2 + "-%s.txt" % (variant,)):
         if current_status is None:
