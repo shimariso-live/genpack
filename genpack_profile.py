@@ -99,7 +99,7 @@ def extract_stage3(root_dir, variant = "systemd"):
         workdir.move_to_trash(root_dir)
         os.makedirs(root_dir)
         print("Extracting stage3...")
-        subprocess.check_call(sudo(["tar", "xpf", stage3_tarball, "--strip-components=1", "-C", root_dir]))
+        subprocess.check_call(sudo(["tar", "xpf", stage3_tarball, "--strip-components=1", "--exclude=./dev/*", "-C", root_dir]))
 
     kernel_config_dir = os.path.join(root_dir, "etc/kernels")
     repos_dir = os.path.join(root_dir, "var/db/repos/gentoo")
