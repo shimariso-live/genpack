@@ -1,4 +1,4 @@
-import os,json,subprocess,re,shutil
+import os,json,subprocess,re,shutil,glob
 import workdir,arch,package,genpack_profile,genpack_json,env
 from sudo import sudo
 
@@ -9,8 +9,8 @@ class Artifact:
         self.name = artifact
         self.artifact_dir = os.path.join(".", "artifacts", artifact)
         self.active_variant = None
-        if not os.path.isdir(self.artifact_dir):
-            raise Exception("No such artifact: %s" % artifact)
+        #if not os.path.isdir(self.artifact_dir):
+        #    raise Exception("No such artifact: %s" % artifact)
         #else
         self.build_json = None
         build_json_path = os.path.join(self.artifact_dir, "build.json")
@@ -30,7 +30,8 @@ class Artifact:
         #else
         return self.build_json[key] if key in self.build_json else default_value
     def get_packages(self):
-        packages = self.lookup_build_json("packages", [])
+        packages = self.lookup_build_json("packages", None)
+        if packages is None: packages = ['@' + self.name]
         if not isinstance(packages, list): raise Exception("packages must be list")
         #else
         return packages
@@ -54,10 +55,18 @@ class Artifact:
     def get_compression(self, default_value = "gzip"):
         return self.lookup_build_json("compression", default_value)
     def get_profile(self, default_profile_name = "default"):
-        return genpack_profile.Profile(self.lookup_build_json("profile", default_profile_name))
+        profile = self.lookup_build_json("profile", None)
+        if profile is not None: return genpack_profile.Profile(profile)
+        #else
+        candidates = genpack_profile.Profile.get_profiles_have_set(self.name)
+        if len(candidates) == 0: return genpack_profile.Profile(default_profile_name)
+        if len(candidates) == 1: return candidates[0]
+        #else
+        candidate_names = [p.name for p in candidates]
+        raise Exception("Multiple profiles found for artifact %s: %s" % (self.name, ', '.join(candidate_names)))
     def get_last_modified(self):
+        if not os.path.isdir(self.artifact_dir): return 0
         # get last modified time of the artifact directory and its contents
-        import os.path
         last_modified = os.path.getmtime(self.artifact_dir)
         for root, dirs, files in os.walk(self.artifact_dir):
             for name in files:
@@ -92,6 +101,19 @@ class Artifact:
         self.active_variant = variant
     def get_active_variant(self):
         return self.active_variant
+
+def upper_exec(gentoo_dir, upper_dir, cache_dir, profile, artifact, variant, command):
+    variant_args = ["-E", "VARIANT=%s" % variant] if variant is not None else []
+    # convert command to list if it is string
+    if isinstance(command, str): command = [command]
+    subprocess.check_call(sudo(["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", 
+        gentoo_dir, "--overlay=+/:%s:/" % escape_colon(os.path.abspath(upper_dir)), 
+        "--bind=%s:/var/cache" % os.path.abspath(cache_dir),
+        "--bind-ro=%s:/var/db/repos/gentoo" % os.path.abspath(workdir.get_portage(False)),
+        "--capability=CAP_MKNOD",
+        "-E", "PROFILE=%s" % profile.name, "-E", "ARTIFACT=%s" % artifact.name] + variant_args 
+        + env.get_as_systemd_nspawn_args()
+        + command))
 
 def escape_colon(s):
     # systemd-nspaws' some options need colon to be escaped
@@ -231,6 +253,14 @@ def build(artifact):
     variant = artifact.get_active_variant()
     variant_args = ["-E", "VARIANT=%s" % variant] if variant is not None else []
 
+    # execute process /usr/lib/genpack/package-scripts/*
+    for f in glob.glob("usr/lib/genpack/package-scripts/*", root_dir=gentoo_dir):
+        # check if executable
+        if not os.access(os.path.join(gentoo_dir, f), os.X_OK): continue
+        #else
+        print("Executing package script %s..." % f)
+        upper_exec(gentoo_dir, upper_dir, cache_dir, profile, artifact, variant, f)
+
     # per-package setup
     newest_pkg_file = 0
     for pkg in pkgs:
@@ -241,22 +271,13 @@ def build(artifact):
         print("Processing package %s..." % pkg_wo_ver)
         newest_pkg_file = max(newest_pkg_file, sync_files(package_dir, upper_dir, r"^CONTENTS(\.|$)"))
         if os.path.isfile(os.path.join(upper_dir, "pkgbuild")):
-            subprocess.check_call(sudo(["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", gentoo_dir, "--overlay=+/:%s:/" % escape_colon(os.path.abspath(upper_dir)), 
-                "--bind=%s:/var/cache" % os.path.abspath(cache_dir),
-                "-E", "PROFILE=%s" % profile.name, "-E", "ARTIFACT=%s" % artifact.name] + variant_args 
-                + env.get_as_systemd_nspawn_args()
-                + [ "--capability=CAP_MKNOD", "sh", "-c", "/pkgbuild && rm -f /pkgbuild" ]))
+            upper_exec(gentoo_dir, upper_dir, cache_dir, profile, artifact, variant, ["sh", "-c", "/pkgbuild && rm -f /pkgbuild"])
 
     # artifact specific setup
     newest_artifact_file = max(newest_pkg_file, sync_files(artifact.get_dir(), upper_dir))
     if os.path.isfile(os.path.join(upper_dir, "build")):
         print("Building artifact...")
-        subprocess.check_call(sudo(["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", gentoo_dir, 
-            "--overlay=+/:%s:/" % escape_colon(os.path.abspath(upper_dir)), 
-            "--bind=%s:/var/cache" % os.path.abspath(cache_dir),
-            "-E", "PROFILE=%s" % profile.name, "-E", "ARTIFACT=%s" % artifact.name] + variant_args 
-            + env.get_as_systemd_nspawn_args()
-            + [ "/build" ]))
+        upper_exec(gentoo_dir, upper_dir, cache_dir, profile, artifact, variant, "/build")
     else:
         print("Artifact build script not found.")
     subprocess.check_call(sudo(["rm", "-rf", os.path.join(upper_dir, "build"), os.path.join(upper_dir,"build.json"), os.path.join(upper_dir,"usr/src")]))
