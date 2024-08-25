@@ -37,7 +37,7 @@ def build(args):
         for artifact in args.artifact:
             artifacts.append(genpack_artifact.Artifact(artifact))
     
-    if len(artifacts) == 0: artifact.append(genpack_artifact.Artifact("default"))
+    if len(artifacts) == 0: artifacts.append(genpack_artifact.Artifact("default"))
 
     if args.variant is not None:
         if len(artifacts) > 1:
