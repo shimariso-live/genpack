@@ -20,6 +20,9 @@ def get_stage3_tarball_path(variant = "systemd-mergedusr"):
 def get_portage_tarball_path():
     return os.path.join(get_genpack_user_dir(), "portage.tar.xz")
 
+def get_overlay_dir():
+    return os.path.join(get_genpack_user_dir(), "genpack-overlay")
+
 class lockfile:
     def __init__(self, lockfile_path):
         self.lockfile = open(lockfile_path, "a+")
@@ -45,6 +48,15 @@ class stage3_tarball(lockfile):
 class portage_tarball(lockfile):
     def __init__(self):
         self.path = get_portage_tarball_path()
+        super().__init__(self.path + ".lock")
+    def __enter__(self):
+        return self.path
+    def __exit__(self, type, value, traceback):
+        super().__exit__(type, value, traceback)
+
+class overlay_dir(lockfile):
+    def __init__(self):
+        self.path = get_overlay_dir()
         super().__init__(self.path + ".lock")
     def __enter__(self):
         return self.path

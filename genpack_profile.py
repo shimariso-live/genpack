@@ -42,6 +42,12 @@ class Profile:
         for profile_name in profile_names:
             profiles.append(Profile(profile_name))
         return profiles
+    def get_profiles_have_set(set_name):
+        profiles = []
+        for profile_name in os.listdir(os.path.join(".", "profiles")):
+            if os.path.isfile(os.path.join(".", "profiles", profile_name, "etc/portage/sets", set_name)):
+                profiles.append(Profile(profile_name))
+        return profiles
     def exists(profile_name):
         return os.path.isdir(os.path.join(".", "profiles", profile_name))
 
@@ -113,6 +119,21 @@ def extract_stage3(root_dir, variant = "systemd"):
     with open(stage3_done_file, "w") as f:
         pass
 
+def sync_overlay(root_dir, overlay_url = "https://github.com/wbrxcorp/genpack-overlay.git"):
+    with user_dir.overlay_dir() as overlay_dir:
+        if os.path.exists(os.path.join(overlay_dir, ".git")):
+            print("Syncing genpack-overlay...")
+            if subprocess.call(["git", "-C", overlay_dir, "pull"]) != 0:
+                print("Failed to pull genpack-overlay, proceeding without sync")
+        else:
+            subprocess.check_call(["git", "clone", overlay_url, overlay_dir])
+        subprocess.check_call(sudo(["rsync", "-a", "--delete", overlay_dir, os.path.join(root_dir, "var/db/repos/")]))
+    if not os.path.exists(os.path.join(root_dir, "etc/portage/repos.conf")):
+        subprocess.check_call(sudo(["mkdir", "-m", "0777", os.path.join(root_dir, "etc/portage/repos.conf")]))
+    if not os.path.isfile(os.path.join(root_dir, "etc/portage/repos.conf/genpack-overlay.conf")):
+        with open(os.path.join(root_dir, "etc/portage/repos.conf/genpack-overlay.conf"), "w") as f:
+            f.write("[genpack-overlay]\nlocation=/var/db/repos/genpack-overlay")
+
 def scan_files(dir):
     files_found = []
     newest_file = 0
@@ -144,6 +165,7 @@ def prepare(profile, sync = False, build_sh = True):
     extract_portage()
     gentoo_dir = profile.get_gentoo_workdir()
     extract_stage3(gentoo_dir)
+    sync_overlay(gentoo_dir)
 
     common = Profile.exists("@common") and Profile("@common") or None
     newest_file = 0
@@ -194,12 +216,17 @@ def prepare(profile, sync = False, build_sh = True):
             "system", "nano", "gentoolkit", "pkgdev", "zip", 
             "dev-debug/strace", "vim", "tcpdump", "netkit-telnetd"])
         # genpack-progs now needs argparse
-        lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "-u1", "-bk", "--binpkg-respect-use=y", 
-            "dev-cpp/argparse"], nspawn_opts=["--setenv=ACCEPT_KEYWORDS=~*"])
-        if os.path.isfile(os.path.join(gentoo_dir, "prepare")):
+        #lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "-u1", "-bk", "--binpkg-respect-use=y", 
+        #    "dev-cpp/argparse"], nspawn_opts=["--setenv=ACCEPT_KEYWORDS=~*"])
+        prepare_script = os.path.join(gentoo_dir, "prepare")
+        if os.path.isfile(prepare_script and os.access(prepare_script, os.X_OK)):
             lower_exec(gentoo_dir, cache_dir, portage_dir, ["/prepare"])
         elif os.path.isfile(os.path.join(gentoo_dir, "build.sh")):
             lower_exec(gentoo_dir, cache_dir, portage_dir, ["/build.sh"])
+        else:
+            print("No prepare script or build.sh found, running default commands...")
+            lower_exec(gentoo_dir, cache_dir, portage_dir, ["sh", "-c", "emerge -uDN -bk --binpkg-respect-use=y genpack-progs $(ls -1 /etc/portage/sets | sed 's/^/@/')"])
+
         lower_exec(gentoo_dir, cache_dir, portage_dir, ["sh", "-c", "emerge -bk --binpkg-respect-use=y @preserved-rebuild && emerge --depclean && etc-update --automode -5 && eclean-dist -d && eclean-pkg -d"])
         profile.set_gentoo_workdir_time()
 
