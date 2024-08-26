@@ -108,10 +108,24 @@ def scan_pkg_dep(gentoo_dir, pkg_map, pkgnames, masked_packages, pkgs = None, ne
             else: raise BaseException("Package %s not found" % pkgname)
         #else
         for cat_pn in pkg_map[pkgname]:
-            cat_pn_wo_ver = strip_ver(cat_pn)
+            # check USE flag and skip if it contains "genpack-ignore"
+            use_file = os.path.join(gentoo_dir, "var/db/pkg", cat_pn, "USE")
+            if os.path.isfile(use_file):
+                with open(use_file) as f:
+                    if re.search(rf"(?<!\w)genpack-ignore(?!\w)", f.read()) is not None:
+                        #print("IGNORING: %s" % cat_pn)
+                        continue
+            # check INHERITED and skip if it contains "kernel-install" as it's considered as a kernel
+            inherited_file = os.path.join(gentoo_dir, "var/db/pkg", cat_pn, "INHERITED")
+            if os.path.isfile(inherited_file):
+                with open(inherited_file) as f:
+                    if re.search(rf"(?<!\w)kernel-install(?!\w)", f.read()) is not None:
+                        #print("IGNORING: %s" % cat_pn)
+                        continue
+
             if cat_pn in pkgs: # already exists
                 if needed_by is not None: pkgs[cat_pn]["NEEDED_BY"].add(needed_by)
-                continue 
+                continue
 
             pkgs[cat_pn] = {"NEEDED_BY": set() if needed_by is None else {needed_by}} # add self
 
