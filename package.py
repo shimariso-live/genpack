@@ -1,4 +1,5 @@
-import os,re
+import os,re,subprocess
+from sudo import sudo
 
 def get_last_modified():
     newest_mtime = 0
@@ -108,18 +109,11 @@ def scan_pkg_dep(gentoo_dir, pkg_map, pkgnames, masked_packages, pkgs = None, ne
             else: raise BaseException("Package %s not found" % pkgname)
         #else
         for cat_pn in pkg_map[pkgname]:
-            # check USE flag and skip if it contains "genpack-ignore"
-            use_file = os.path.join(gentoo_dir, "var/db/pkg", cat_pn, "USE")
-            if os.path.isfile(use_file):
-                with open(use_file) as f:
-                    if re.search(rf"(?<!\w)genpack-ignore(?!\w)", f.read()) is not None:
-                        #print("IGNORING: %s" % cat_pn)
-                        continue
             # check INHERITED and skip if it contains "kernel-install" as it's considered as a kernel
             inherited_file = os.path.join(gentoo_dir, "var/db/pkg", cat_pn, "INHERITED")
             if os.path.isfile(inherited_file):
                 with open(inherited_file) as f:
-                    if re.search(rf"(?<!\w)kernel-install(?!\w)", f.read()) is not None:
+                    if re.search(rf"(?<!\w)(genpack-ignore|kernel-install)(?!\w)", f.read()) is not None:
                         #print("IGNORING: %s" % cat_pn)
                         continue
 
@@ -168,6 +162,19 @@ def is_path_excluded(path, devel = False):
 
 def get_all_files_of_all_packages(root_dir, pkgs, devel = False):
     files = []
+
+    if os.access(os.path.join(root_dir, "usr/bin/genpack-get-all-package-files"), os.X_OK):
+        cmdline = sudo(["chroot", root_dir, "/usr/bin/genpack-get-all-package-files"] + pkgs)
+        # run cmdline as subprocess and get the output line by line. 
+        process = subprocess.Popen(cmdline, stdout=subprocess.PIPE)
+        for line in process.stdout:
+            file_to_append = line.decode().strip()
+            if not is_path_excluded(file_to_append, devel): files.append(file_to_append)
+        process.wait()
+
+        return files
+
+    #else
     for pkg in pkgs:
         if pkg[0] == '@': continue
         contents_file = os.path.join(root_dir, "var/db/pkg" , pkg, "CONTENTS")
