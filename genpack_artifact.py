@@ -254,7 +254,7 @@ def build(artifact):
     variant_args = ["-E", "VARIANT=%s" % variant] if variant is not None else []
 
     # execute process /usr/lib/genpack/package-scripts/*
-    for f in glob.glob("usr/lib/genpack/package-scripts/*", root_dir=gentoo_dir):
+    for f in sorted(glob.glob("usr/lib/genpack/package-scripts/*", root_dir=gentoo_dir)):
         # check if executable
         if not os.access(os.path.join(gentoo_dir, f), os.X_OK): continue
         #else
