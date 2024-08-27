@@ -208,16 +208,15 @@ def prepare(profile, sync = False, build_sh = True):
     done_file_time = profile.get_gentoo_workdir_time()
 
     portage_time = os.stat(os.path.join(portage_dir, "metadata/timestamp")).st_mtime
-    newest_file = max(newest_file, portage_time)
+    overlay_index = os.path.join(user_dir.get_overlay_dir(), ".git/index")
+    overlay_time = os.stat(overlay_index).st_mtime if os.path.isfile(overlay_index) else 0
+    newest_file = max(newest_file, portage_time, overlay_time)
 
     if build_sh == "force" or (build_sh == True and (not done_file_time or newest_file > done_file_time or sync)):
         lower_exec(gentoo_dir, cache_dir, portage_dir, ["emaint", "binhost", "--fix"])
         lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "-uDN", "-bk", "--binpkg-respect-use=y", 
             "system", "nano", "gentoolkit", "pkgdev", "zip", 
             "dev-debug/strace", "vim", "tcpdump", "netkit-telnetd"])
-        # genpack-progs now needs argparse
-        #lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "-u1", "-bk", "--binpkg-respect-use=y", 
-        #    "dev-cpp/argparse"], nspawn_opts=["--setenv=ACCEPT_KEYWORDS=~*"])
         prepare_script = os.path.join(gentoo_dir, "prepare")
         if os.path.isfile(prepare_script and os.access(prepare_script, os.X_OK)):
             lower_exec(gentoo_dir, cache_dir, portage_dir, ["/prepare"])
