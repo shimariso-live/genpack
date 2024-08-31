@@ -253,18 +253,15 @@ def build(artifact):
     variant = artifact.get_active_variant()
     variant_args = ["-E", "VARIANT=%s" % variant] if variant is not None else []
 
-    # execute process /usr/lib/genpack/package-scripts/*
-    for f in sorted(glob.glob("usr/lib/genpack/package-scripts/*", root_dir=gentoo_dir)):
-        # check if executable
-        if not os.access(os.path.join(gentoo_dir, f), os.X_OK): continue
-        #else
-        print("Executing package script %s..." % f)
-        upper_exec(gentoo_dir, upper_dir, cache_dir, profile, artifact, variant, f)
-
     # per-package setup
     newest_pkg_file = 0
     for pkg in pkgs:
         pkg_wo_ver = pkg if pkg[0] == '@' else package.strip_ver(pkg)
+        for f in sorted(glob.glob("usr/lib/genpack/package-scripts/%s/*" % (pkg_wo_ver), root_dir=gentoo_dir)):
+            if not os.access(os.path.join(gentoo_dir, f), os.X_OK): continue
+            #else
+            print("Executing package script %s..." % f)
+            upper_exec(gentoo_dir, upper_dir, cache_dir, profile, artifact, variant, f)
         package_dir = package.get_dir(pkg_wo_ver)
         if not os.path.isdir(package_dir): continue
         #else
