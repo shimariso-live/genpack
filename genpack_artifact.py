@@ -200,7 +200,7 @@ def get_masked_packages(gentoo_dir) -> set:
             masked_packages.add(line)
     return masked_packages
 
-def build(artifact):
+def build_legacy(artifact):
     upper_dir = artifact.get_workdir()
     workdir.move_to_trash(upper_dir, True)
     os.makedirs(os.path.dirname(upper_dir), exist_ok=True)
@@ -312,6 +312,57 @@ def build(artifact):
             f.write('\n')
     subprocess.check_call(sudo(["chown", "-R", "root:root", genpack_metadata_dir]))
     subprocess.check_call(sudo(["chmod", "755", genpack_metadata_dir]))
+
+def build(artifact):
+    upper_dir = artifact.get_workdir()
+    workdir.move_to_trash(upper_dir, True)
+    os.makedirs(os.path.dirname(upper_dir), exist_ok=True)
+    subprocess.check_call(sudo(["mkdir", upper_dir]))
+    profile = artifact.get_profile()
+    
+    gentoo_dir = profile.get_gentoo_workdir()
+    cache_dir = profile.get_cache_workdir()
+
+    print("Copying files to artifact dir...")
+    cmdline = ["/usr/bin/copyup-packages", "--bind-mount-root", "--toplevel-dirs", "--exec-package-scripts"]
+    cmdline += ["--generate-metadata"]
+    if artifact.is_devel(): cmdline += ["--devel"]
+    cmdline += artifact.get_packages()
+    variant = artifact.get_active_variant()
+    upper_exec(gentoo_dir, upper_dir, cache_dir, profile, artifact, variant, cmdline)
+
+    # per-package setup
+    pkgs = []
+    with open(os.path.join(upper_dir, ".genpack/packages")) as f:
+        for line in f:
+            line = line.strip()
+            if line == "" or line[0] == '#': continue
+            #else
+            # remove trailing [...] from line
+            line = re.sub(r'\[.*\]$', "", line)
+            pkgs.append(line)
+    newest_pkg_file = 0
+    for pkg in pkgs:
+        pkg_wo_ver = pkg if pkg[0] == '@' else package.strip_ver(pkg)
+        package_dir = package.get_dir(pkg_wo_ver)
+        if not os.path.isdir(package_dir): continue
+        #else
+        print("Processing package %s..." % pkg_wo_ver)
+        newest_pkg_file = max(newest_pkg_file, sync_files(package_dir, upper_dir, r"^CONTENTS(\.|$)"))
+        if os.path.isfile(os.path.join(upper_dir, "pkgbuild")):
+            upper_exec(gentoo_dir, upper_dir, cache_dir, profile, artifact, variant, ["sh", "-c", "/pkgbuild && rm -f /pkgbuild"])
+
+    # artifact specific setup
+    newest_artifact_file = max(newest_pkg_file, sync_files(artifact.get_dir(), upper_dir))
+    if os.path.isfile(os.path.join(upper_dir, "build")):
+        print("Building artifact...")
+        upper_exec(gentoo_dir, upper_dir, cache_dir, profile, artifact, variant, "/build")
+    else:
+        print("Artifact build script not found.")
+    subprocess.check_call(sudo(["rm", "-rf", os.path.join(upper_dir, "build"), os.path.join(upper_dir,"build.json"), os.path.join(upper_dir,"usr/src")]))
+
+    # enable services
+    enable_services(upper_dir, artifact.get_services())
 
 def pack(artifact, outfile=None, compression=None):
     if outfile is None: outfile = artifact.get_outfile()
