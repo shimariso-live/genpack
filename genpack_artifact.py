@@ -185,7 +185,9 @@ def set_locale_conf_to_pam_env(root_dir):
     subprocess.check_call(sudo(["sed", "-i", r"/^session\t\+required\t\+pam_env\.so envfile=\/etc\/profile\.env$/a session\t\trequired\tpam_env.so envfile=\/etc\/locale.conf", os.path.join(root_dir, "etc/pam.d/system-login") ]))
 
 def enable_services(root_dir, services):
+    if services is None: return
     if not isinstance(services, list): services = [services]
+    if len(services) == 0: return
     subprocess.check_call(sudo(["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", root_dir, "systemctl", "enable"] + services))
 
 def get_masked_packages(gentoo_dir) -> set:
@@ -313,6 +315,21 @@ def build_legacy(artifact):
     subprocess.check_call(sudo(["chown", "-R", "root:root", genpack_metadata_dir]))
     subprocess.check_call(sudo(["chmod", "755", genpack_metadata_dir]))
 
+def get_all_sets(gentoo_dir, pkgs, sets=None):
+    if sets is None: sets = set()
+    for pkg in pkgs:
+        if pkg[0] == '@' and pkg not in sets:
+            sets.add(pkg)
+            sub_sets = []
+            with open(os.path.join(gentoo_dir, "etc/portage/sets", pkg[1:])) as f:
+                for line in f:
+                    line = line.strip()
+                    if line == "" or line[0] != '@': continue
+                    #else
+                    sub_sets.append(line)
+            get_all_sets(gentoo_dir, sub_sets, sets)
+    return list(sets)
+
 def build(artifact):
     upper_dir = artifact.get_workdir()
     workdir.move_to_trash(upper_dir, True)
@@ -327,7 +344,8 @@ def build(artifact):
     cmdline = ["/usr/bin/copyup-packages", "--bind-mount-root", "--toplevel-dirs", "--exec-package-scripts"]
     cmdline += ["--generate-metadata"]
     if artifact.is_devel(): cmdline += ["--devel"]
-    cmdline += artifact.get_packages()
+    artifact_packages = artifact.get_packages()
+    cmdline += artifact_packages
     variant = artifact.get_active_variant()
     upper_exec(gentoo_dir, upper_dir, cache_dir, profile, artifact, variant, cmdline)
 
@@ -341,6 +359,9 @@ def build(artifact):
             # remove trailing [...] from line
             line = re.sub(r'\[.*\]$', "", line)
             pkgs.append(line)
+    # get sets from artifact_packages
+    pkgs += get_all_sets(gentoo_dir, artifact_packages)
+
     newest_pkg_file = 0
     for pkg in pkgs:
         pkg_wo_ver = pkg if pkg[0] == '@' else package.strip_ver(pkg)
