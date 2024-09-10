@@ -165,7 +165,7 @@ def link_files(srcdir, dstdir):
     
     return newest_file
 
-def prepare(profile, sync = False, build_sh = True):
+def prepare_legacy(profile, sync = False, build_sh = True):
     if profile.name[0] == '@': raise Exception("Profile name starts with @ is reserved")
     extract_portage()
     gentoo_dir = profile.get_gentoo_workdir()
@@ -234,7 +234,39 @@ def prepare(profile, sync = False, build_sh = True):
         lower_exec(gentoo_dir, cache_dir, portage_dir, ["sh", "-c", "emerge -bk --binpkg-respect-use=y @preserved-rebuild && emerge --depclean && etc-update --automode -5 && eclean-dist -d && eclean-pkg -d"])
         profile.set_gentoo_workdir_time()
 
+def prepare(profile, setup_only = False):
+    extract_portage()
+    gentoo_dir = profile.get_gentoo_workdir()
+    extract_stage3(gentoo_dir)
+    sync_overlay(gentoo_dir)
+
+    newest_file = 0
+    newest_file = max(newest_file, link_files(profile.get_dir(), gentoo_dir))
+
+    # move files under /var/cache
+    cache_dir = profile.get_cache_workdir()
+    os.makedirs(cache_dir, exist_ok=True)
+    subprocess.check_call(sudo(["rsync", "-a", "--remove-source-files", os.path.join(gentoo_dir,"var/cache/"), cache_dir]))
+
+    portage_dir = workdir.get_portage(False)
+    done_file_time = profile.get_gentoo_workdir_time()
+
+    portage_time = os.stat(os.path.join(portage_dir, "metadata/timestamp")).st_mtime
+    overlay_index = os.path.join(user_dir.get_overlay_dir(), ".git/index")
+    overlay_time = os.stat(overlay_index).st_mtime if os.path.isfile(overlay_index) else 0
+    newest_file = max(newest_file, portage_time, overlay_time)
+
+    if setup_only or (done_file_time is not None and  newest_file <= done_file_time): return
+
+    #else
+    lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "-uDN", "genpack-progs"])
+    lower_exec(gentoo_dir, cache_dir, portage_dir, ["genpack-prepare"])
+
 def bash(profile):
-    prepare(profile, False, False)
+    prepare(profile, True)
     print("Entering profile %s with bash..." % profile.name)
-    lower_exec(profile.get_gentoo_workdir(), profile.get_cache_workdir(), workdir.get_portage(False), ["bash"])
+    try:
+        lower_exec(profile.get_gentoo_workdir(), profile.get_cache_workdir(), workdir.get_portage(False), ["bash"])
+    except subprocess.CalledProcessError:
+        # ignore exception raised by subprocess.check_call
+        pass
