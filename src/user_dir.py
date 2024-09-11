@@ -21,6 +21,10 @@ def get_portage_tarball_path():
     return os.path.join(get_genpack_user_dir(), "portage.tar.xz")
 
 def get_overlay_dir():
+    # to override this, set the GENPACK_OVERLAY_DIR environment variable
+    if "GENPACK_OVERLAY_DIR" in os.environ:
+        return os.environ["GENPACK_OVERLAY_DIR"]
+    #else
     return os.path.join(get_genpack_user_dir(), "genpack-overlay")
 
 class lockfile:

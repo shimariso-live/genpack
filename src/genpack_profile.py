@@ -1,7 +1,6 @@
-import os,subprocess,importlib.resources,glob
-import workdir,user_dir,upstream,arch,genpack_json,env
-import initlib,init,util
-from sudo import sudo,Tee
+import os,subprocess,glob
+import workdir,user_dir,upstream,genpack_json,env
+from sudo import sudo
 
 CONTAINER_NAME="genpack-profile-%d" % os.getpid()
 _extract_portage_done = False
@@ -61,12 +60,6 @@ def lower_exec(lower_dir, cache_dir, portage_dir, cmdline, nspawn_opts=[]):
             + env.get_as_systemd_nspawn_args()
             + nspawn_opts + cmdline)
     )
-
-def put_resource_file(gentoo_dir, module, filename, dst_filename=None, make_executable=False):
-    dst_path = os.path.join(gentoo_dir, dst_filename if dst_filename is not None else filename)
-    with Tee(dst_path) as f:
-        f.write(importlib.resources.files(module).joinpath(filename).read_bytes())
-    if make_executable: subprocess.check_output(sudo(["chmod", "+x", dst_path]))
 
 def extract_portage():
     global _extract_portage_done
@@ -165,75 +158,6 @@ def link_files(srcdir, dstdir):
     
     return newest_file
 
-def prepare_legacy(profile, sync = False, build_sh = True):
-    if profile.name[0] == '@': raise Exception("Profile name starts with @ is reserved")
-    extract_portage()
-    gentoo_dir = profile.get_gentoo_workdir()
-    extract_stage3(gentoo_dir)
-    sync_overlay(gentoo_dir)
-
-    common = Profile.exists("@common") and Profile("@common") or None
-    newest_file = 0
-    if common: newest_file = link_files(common.get_dir(), gentoo_dir)
-    newest_file = max(newest_file, link_files(profile.get_dir(), gentoo_dir))
-    # remove irrelevant arch dependent settings
-    for i in glob.glob(os.path.join(gentoo_dir, "etc/portage/package.*/arch-*")):
-        if not i.endswith("-" + arch.get()) and os.path.isfile(i): os.unlink(i)
-    for i in glob.glob(os.path.join(gentoo_dir, "etc/portage/sets/*.%s" % arch.get())):
-        if os.path.isfile(i): os.rename(i,  i[:i.rfind(".")])
-
-    # move files under /var/cache
-    cache_dir = profile.get_cache_workdir()
-    os.makedirs(cache_dir, exist_ok=True)
-    subprocess.check_call(sudo(["rsync", "-a", "--remove-source-files", os.path.join(gentoo_dir,"var/cache/"), cache_dir]))
-
-    if os.path.isfile(os.path.join(gentoo_dir, "build.sh")):
-        # put legacy resources if build.sh exists
-        put_resource_file(gentoo_dir, initlib, "initlib.cpp")
-        put_resource_file(gentoo_dir, initlib, "initlib.h")
-        put_resource_file(gentoo_dir, initlib, "fat.cpp")
-        put_resource_file(gentoo_dir, initlib, "fat.h")
-        put_resource_file(gentoo_dir, init, "init.cpp")
-        put_resource_file(gentoo_dir, init, "init.h")
-        put_resource_file(gentoo_dir, init, "init-systemimg.cpp")
-        put_resource_file(gentoo_dir, init, "init-paravirt.cpp")
-        put_resource_file(gentoo_dir, util, "build-kernel.py", "usr/local/sbin/build-kernel", True)
-        put_resource_file(gentoo_dir, util, "recursive-touch.py", "usr/local/bin/recursive-touch", True)
-        put_resource_file(gentoo_dir, util, "overlay_init.py", "sbin/overlay-init", True)
-        put_resource_file(gentoo_dir, util, "with-mysql.py", "usr/local/sbin/with-mysql", True)
-        put_resource_file(gentoo_dir, util, "download.py", "usr/local/bin/download", True)
-        put_resource_file(gentoo_dir, util, "install-system-image", "usr/sbin/install-system-image", True)
-        put_resource_file(gentoo_dir, util, "expand-rw-layer", "usr/sbin/expand-rw-layer", True)
-        put_resource_file(gentoo_dir, util, "do-with-lvm-snapshot", "usr/sbin/do-with-lvm-snapshot", True)
-        put_resource_file(gentoo_dir, util, "genpack-install.cpp", "usr/src/genpack-install.cpp", True)
-
-    portage_dir = workdir.get_portage(False)
-    if sync: lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "--sync"])
-
-    done_file_time = profile.get_gentoo_workdir_time()
-
-    portage_time = os.stat(os.path.join(portage_dir, "metadata/timestamp")).st_mtime
-    overlay_index = os.path.join(user_dir.get_overlay_dir(), ".git/index")
-    overlay_time = os.stat(overlay_index).st_mtime if os.path.isfile(overlay_index) else 0
-    newest_file = max(newest_file, portage_time, overlay_time)
-
-    if build_sh == "force" or (build_sh == True and (not done_file_time or newest_file > done_file_time or sync)):
-        lower_exec(gentoo_dir, cache_dir, portage_dir, ["emaint", "binhost", "--fix"])
-        lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "-uDN", "-bk", "--binpkg-respect-use=y", 
-            "system", "nano", "gentoolkit", "pkgdev", "zip", 
-            "dev-debug/strace", "vim", "tcpdump", "netkit-telnetd"])
-        prepare_script = os.path.join(gentoo_dir, "prepare")
-        if os.path.isfile(prepare_script and os.access(prepare_script, os.X_OK)):
-            lower_exec(gentoo_dir, cache_dir, portage_dir, ["/prepare"])
-        elif os.path.isfile(os.path.join(gentoo_dir, "build.sh")):
-            lower_exec(gentoo_dir, cache_dir, portage_dir, ["/build.sh"])
-        else:
-            print("No prepare script or build.sh found, running default commands...")
-            lower_exec(gentoo_dir, cache_dir, portage_dir, ["sh", "-c", "emerge -uDN -bk --binpkg-respect-use=y genpack-progs $(ls -1 /etc/portage/sets | sed 's/^/@/')"])
-
-        lower_exec(gentoo_dir, cache_dir, portage_dir, ["sh", "-c", "emerge -bk --binpkg-respect-use=y @preserved-rebuild && emerge --depclean && etc-update --automode -5 && eclean-dist -d && eclean-pkg -d"])
-        profile.set_gentoo_workdir_time()
-
 def prepare(profile, setup_only = False):
     extract_portage()
     gentoo_dir = profile.get_gentoo_workdir()
@@ -252,8 +176,11 @@ def prepare(profile, setup_only = False):
     done_file_time = profile.get_gentoo_workdir_time()
 
     portage_time = os.stat(os.path.join(portage_dir, "metadata/timestamp")).st_mtime
-    overlay_index = os.path.join(user_dir.get_overlay_dir(), ".git/index")
-    overlay_time = os.stat(overlay_index).st_mtime if os.path.isfile(overlay_index) else 0
+    overlay_time = 0
+    overlay_dir = user_dir.get_overlay_dir()
+    # check latest mtime of overlay_dir/**/Manifect
+    for manifest in glob.glob("**/Manifest", root_dir=overlay_dir, recursive=True):
+        overlay_time = max(overlay_time, os.stat(os.path.join(overlay_dir, manifest)).st_mtime)
     newest_file = max(newest_file, portage_time, overlay_time)
 
     if setup_only or (done_file_time is not None and  newest_file <= done_file_time): return
@@ -265,8 +192,12 @@ def prepare(profile, setup_only = False):
 def bash(profile):
     prepare(profile, True)
     print("Entering profile %s with bash..." % profile.name)
+    print("Run `eclean-pkg -d` to clean up binary packages which is uninstalled.")
+    gentoo_dir = profile.get_gentoo_workdir()
+    cache_dir = profile.get_cache_workdir()
+    portage_dir = workdir.get_portage(False)
     try:
-        lower_exec(profile.get_gentoo_workdir(), profile.get_cache_workdir(), workdir.get_portage(False), ["bash"])
+        lower_exec(gentoo_dir, cache_dir, portage_dir, ["bash"])
     except subprocess.CalledProcessError:
         # ignore exception raised by subprocess.check_call
         pass

@@ -1,2 +1,2 @@
 #!/bin/sh
-exec python ../__main__.py "$@"
+exec python -B ../src/__main__.py "$@"

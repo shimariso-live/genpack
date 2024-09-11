@@ -1,26 +1,16 @@
-all: genpack genpack-install
+PREFIX=/usr/local
 
-genpack.zip: __main__.py qemu.py sudo.py arch.py genpack_profile.py genpack_artifact.py package.py \
-		upstream.py user_dir.py workdir.py genpack_json.py env.py \
-		initlib/__init__.py initlib/initlib.cpp initlib/initlib.h initlib/fat.cpp initlib/fat.h \
-		init/__init__.py init/init.cpp init/init.h init/init-systemimg.cpp init/init-paravirt.cpp \
-		util/__init__.py util/install-system-image util/expand-rw-layer util/do-with-lvm-snapshot util/build-kernel.py \
-		util/download.py util/recursive-touch.py util/overlay_init.py util/with-mysql.py util/genpack-install.cpp
-	python -m py_compile __main__.py
-	rm -f $@
-	zip $@ $^
+SRCS := $(shell find src/ -type f -name '*.py')
 
-genpack: genpack.zip
-	echo '#!/usr/bin/env python' | cat - $^ > $@
-	chmod +x $@
+all: genpack
 
-genpack-install: util/genpack-install.cpp
-	g++ -std=c++2a -o $@ $^ -lmount -lblkid
+genpack: $(SRCS)
+	find src -type d -name '__pycache__' -exec rm -r {} +
+	python -m zipapp src -p '/usr/bin/python3' -c -o $@
 
 install: all
-	cp -a genpack /usr/local/bin/
-	cp -a genpack-install /usr/local/sbin/
+	install -Dm755 genpack $(DESTDIR)$(PREFIX)/bin/genpack
 
 clean:
-	rm -rf genpack.zip genpack __pycache__ *.squashfs genpack-install
-
+	rm -f genpack 
+	find src -type d -name '__pycache__' -exec rm -r {} +
