@@ -1,4 +1,4 @@
-PREFIX=/usr/local
+PREFIX ?= /usr/local
 
 SRCS := $(shell find src/ -type f -name '*.py')
 
