@@ -186,7 +186,7 @@ def prepare(profile, setup_only = False):
     if setup_only or (done_file_time is not None and  newest_file <= done_file_time): return
 
     #else
-    lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "-uDN", "genpack-progs"])
+    lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "-bk", "--binpkg-respect-use=y", "-uDN", "genpack-progs", "--keep-going"])
     lower_exec(gentoo_dir, cache_dir, portage_dir, ["genpack-prepare"])
 
 def bash(profile):
