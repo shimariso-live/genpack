@@ -5,6 +5,7 @@ from sudo import sudo
 CONTAINER_NAME="genpack-profile-%d" % os.getpid()
 _extract_portage_done = False
 _pull_overlay_done = False
+_cpus = None
 
 class Profile:
     def __init__(self, profile):
@@ -52,14 +53,21 @@ class Profile:
         return os.path.isdir(os.path.join(".", "profiles", profile_name))
 
 def lower_exec(lower_dir, cache_dir, portage_dir, cmdline, nspawn_opts=[]):
-    subprocess.check_call(sudo(
-        ["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", lower_dir, 
-            "--bind=%s:/var/cache" % os.path.abspath(cache_dir),
-            "--capability=CAP_MKNOD,CAP_SYS_ADMIN",
-            "--bind-ro=%s:/var/db/repos/gentoo" % os.path.abspath(portage_dir) ]
-            + env.get_as_systemd_nspawn_args()
-            + nspawn_opts + cmdline)
-    )
+    nspawn_cmdline = ["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", lower_dir, 
+        "--bind=%s:/var/cache" % os.path.abspath(cache_dir),
+        "--capability=CAP_MKNOD,CAP_SYS_ADMIN",
+        "--bind-ro=%s:/var/db/repos/gentoo" % os.path.abspath(portage_dir)
+    ]
+
+    if _cpus is not None:
+        nspawn_cmdline.append("--setenv=MAKEOPTS=-j%d" % _cpus)
+        nspawn_cmdline.append("--setenv=NINJAFLAGS=-j%d" % _cpus)
+    
+    nspawn_cmdline += env.get_as_systemd_nspawn_args()
+    nspawn_cmdline += nspawn_opts
+    nspawn_cmdline += cmdline
+
+    subprocess.check_call(sudo(nspawn_cmdline))
 
 def extract_portage():
     global _extract_portage_done
@@ -158,7 +166,10 @@ def link_files(srcdir, dstdir):
     
     return newest_file
 
-def prepare(profile, setup_only = False):
+def prepare(profile, cpus = None, setup_only = False):
+    global _cpus
+    if cpus is not None: _cpus = cpus
+
     extract_portage()
     gentoo_dir = profile.get_gentoo_workdir()
     extract_stage3(gentoo_dir)
