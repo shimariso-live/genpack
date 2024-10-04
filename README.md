@@ -1,6 +1,14 @@
 # genpack
 Generates squashfs-overlayfs root filesystem from Gentoo Linux
 
+# Prerequisites
+
+- Python 3
+- sudo(if you are not root)
+- git
+- systemd-nspawn (in debian, it is in systemd-container package)
+- squashfs-tools
+
 # Installation
 
 ```
