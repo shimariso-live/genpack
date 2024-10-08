@@ -1,5 +1,5 @@
 import os,json,subprocess,re,shutil,glob
-import workdir,arch,package,genpack_profile,genpack_json,env
+import workdir,arch,package,genpack_profile,genpack_json,global_options
 from sudo import sudo
 
 CONTAINER_NAME="genpack-artifact-%d" % os.getpid()
@@ -112,7 +112,7 @@ def upper_exec(gentoo_dir, upper_dir, cache_dir, profile, artifact, variant, com
         "--bind-ro=%s:/var/db/repos/gentoo" % os.path.abspath(workdir.get_portage(False)),
         "--capability=CAP_MKNOD",
         "-E", "PROFILE=%s" % profile.name, "-E", "ARTIFACT=%s" % artifact.name] + variant_args 
-        + env.get_as_systemd_nspawn_args()
+        + global_options.env_as_systemd_nspawn_args()
         + command))
 
 def escape_colon(s):
@@ -398,5 +398,7 @@ def pack(artifact, outfile=None, compression=None):
     elif compression == "gzip": cmdline += ["-Xcompression-level", "1"]
     elif compression == "lzo": cmdline += ["-comp", "lzo"]
     else: raise BaseException("Unknown compression type %s" % compression)
+    cpus = global_options.cpus()
+    if cpus is not None: cmdline += ["-processors", str(cpus)]
     subprocess.check_call(sudo(cmdline))
     subprocess.check_call(sudo(["chown", "%d:%d" % (os.getuid(), os.getgid()), outfile]))

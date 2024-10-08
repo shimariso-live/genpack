@@ -3,7 +3,7 @@
 # https://github.com/wbrxcorp/genpack/blob/main/LICENSE
 
 import os,sys,subprocess,atexit,logging
-import upstream,workdir,genpack_profile,genpack_artifact,qemu,env
+import upstream,workdir,genpack_profile,genpack_artifact,qemu,global_options
 from sudo import sudo
 
 def prepare(args):
@@ -18,7 +18,7 @@ def prepare(args):
     for profile in profiles:
         print("Preparing profile %s..." % profile.name)
         try:
-            genpack_profile.prepare(profile, args.cpus)
+            genpack_profile.prepare(profile)
         except Exception as e:
             if args.keep_going:
                 logging.error("Error occurred while preparing profile %s: %s" % (profile.name, str(e)))
@@ -93,7 +93,7 @@ def run(args):
 
     print("Pressing ']' 3 times will exit the container and return to the host.")
     cmdline = ["systemd-nspawn", "--suppress-sync=true", "-M", "genpack-run-%d" % os.getpid(), 
-            "-q", "-D", artifact.get_workdir(), "--network-veth"] + env.get_as_systemd_nspawn_args()
+            "-q", "-D", artifact.get_workdir(), "--network-veth"] + global_options.env_as_systemd_nspawn_args()
     if args.bash: cmdline.append("/bin/bash")
     else: cmdline.append("-b")
     subprocess.call(sudo(cmdline))
@@ -114,13 +114,13 @@ if __name__ == "__main__":
     parser.add_argument("--base", default=None, help="Base URL contains dirs 'releases' 'snapshots'")
     parser.add_argument("--workdir", default=None, help="Working directory to use(default:./work)")
     parser.add_argument("--env", default=None, help="Environment variable in NAME=VALUE format (comma separated)")
+    parser.add_argument('--cpus', default=None, type=int, help='Number of CPUs to use')
 
     subparsers = parser.add_subparsers()
     # prepare subcommand
     prepare_parser = subparsers.add_parser('prepare', help='Prepare profiles')
     prepare_parser.add_argument('profile', nargs='*', default=[], help='Profiles to prepare')
     prepare_parser.add_argument('--keep-going', action='store_true', help='Keep going even if an error occurs')
-    prepare_parser.add_argument('--cpus', default=None, type=int, help='Number of CPUs to use')
     prepare_parser.set_defaults(func=prepare)
 
     # bash subcommand
@@ -157,23 +157,19 @@ if __name__ == "__main__":
     clean_parser.set_defaults(func=clean)
 
     args = parser.parse_args()
-    if args.debug:
+
+    global_options.read_global_options(args)
+    if global_options.debug():
         logging.basicConfig(level=logging.DEBUG)
         logging.debug("Debug mode enabled")
 
-    if args.base is not None: 
-        upstream.set_base_url(args.base)
-        print("Base URL set to %s" % args.base)
-    if args.workdir is not None:
-        workdir.set(args.workdir)
-        print("Working directory set to %s" % args.workdir)
+    if global_options.base() is not None: 
+        upstream.set_base_url(global_options.base())
+        logging.info("Base URL set to %s" % global_options.base())
+    if global_options.workdir() is not None:
+        workdir.set(global_options.workdir())
+        logging.info("Working directory set to %s" % global_options.workdir())
     
-    if args.env is not None:
-        for e in args.env.split(","):
-            name, value = e.split("=")
-            env.set(name, value)
-            print("Environment variable %s set to %s" % (name, value))
-
     import genpack_json
     genpack_json.load()
 

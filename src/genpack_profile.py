@@ -1,11 +1,10 @@
 import os,subprocess,glob
-import workdir,user_dir,upstream,genpack_json,env
+import workdir,user_dir,upstream,genpack_json,global_options
 from sudo import sudo
 
 CONTAINER_NAME="genpack-profile-%d" % os.getpid()
 _extract_portage_done = False
 _pull_overlay_done = False
-_cpus = None
 
 class Profile:
     def __init__(self, profile):
@@ -59,11 +58,12 @@ def lower_exec(lower_dir, cache_dir, portage_dir, cmdline, nspawn_opts=[]):
         "--bind-ro=%s:/var/db/repos/gentoo" % os.path.abspath(portage_dir)
     ]
 
-    if _cpus is not None:
-        nspawn_cmdline.append("--setenv=MAKEOPTS=-j%d" % _cpus)
-        nspawn_cmdline.append("--setenv=NINJAFLAGS=-j%d" % _cpus)
+    cpus = global_options.cpus()
+    if cpus is not None:
+        nspawn_cmdline.append("--setenv=MAKEOPTS=-j%d" % cpus)
+        nspawn_cmdline.append("--setenv=NINJAFLAGS=-j%d" % cpus)
     
-    nspawn_cmdline += env.get_as_systemd_nspawn_args()
+    nspawn_cmdline += global_options.env_as_systemd_nspawn_args()
     nspawn_cmdline += nspawn_opts
     nspawn_cmdline += cmdline
 
@@ -166,10 +166,7 @@ def link_files(srcdir, dstdir):
     
     return newest_file
 
-def prepare(profile, cpus = None, setup_only = False):
-    global _cpus
-    if cpus is not None: _cpus = cpus
-
+def prepare(profile, setup_only = False):
     extract_portage()
     gentoo_dir = profile.get_gentoo_workdir()
     extract_stage3(gentoo_dir)
