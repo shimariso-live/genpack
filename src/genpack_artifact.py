@@ -35,6 +35,8 @@ class Artifact:
         if not isinstance(packages, list): raise Exception("packages must be list")
         #else
         return packages
+    def get_dep_removals(self):
+        return self.lookup_build_json("dep-removals", [])
     def get_files(self):
         files = self.lookup_build_json("files", [])
         if not isinstance(files, list): raise Exception("files must be list")
@@ -168,22 +170,6 @@ def sync_files(srcdir, dstdir, exclude=None):
     
     return newest_file
 
-def copyup_gcc_libs(gentoo_dir, upper_dir):
-    subprocess.check_call(sudo(["systemd-nspawn", "-q", "--suppress-sync=true", "-M", CONTAINER_NAME, "-D", gentoo_dir, "--overlay=+/:%s:/" % escape_colon(os.path.abspath(upper_dir)), "sh", "-c", "touch -h `gcc --print-file-name=`/*.so.* && ldconfig" ]))
-
-def remove_root_password(root_dir):
-    subprocess.check_call(sudo(["sed", "-i", r"s/^root:\*:/root::/", os.path.join(root_dir, "etc/shadow") ]))
-
-def make_ld_so_conf_latest(root_dir):
-    subprocess.check_call(sudo(["touch", os.path.join(root_dir, "etc/ld.so.conf") ]))
-
-def create_default_iptables_rules(root_dir):
-    subprocess.check_call(sudo(["touch", os.path.join(root_dir, "var/lib/iptables/rules-save"), os.path.join(root_dir, "var/lib/ip6tables/rules-save")]))
-
-def set_locale_conf_to_pam_env(root_dir):
-    subprocess.check_call(sudo(["sed", "-i", r"s/^export LANG=\(.*\)$/#export LANG=\1 # apply \/etc\/locale.conf instead/", os.path.join(root_dir, "etc/profile.env") ]))
-    subprocess.check_call(sudo(["sed", "-i", r"/^session\t\+required\t\+pam_env\.so envfile=\/etc\/profile\.env$/a session\t\trequired\tpam_env.so envfile=\/etc\/locale.conf", os.path.join(root_dir, "etc/pam.d/system-login") ]))
-
 def enable_services(root_dir, services):
     if services is None: return
     if not isinstance(services, list): services = [services]
@@ -201,119 +187,6 @@ def get_masked_packages(gentoo_dir) -> set:
             #else
             masked_packages.add(line)
     return masked_packages
-
-def build_legacy(artifact):
-    upper_dir = artifact.get_workdir()
-    workdir.move_to_trash(upper_dir, True)
-    os.makedirs(os.path.dirname(upper_dir), exist_ok=True)
-    subprocess.check_call(sudo(["mkdir", upper_dir]))
-    profile = artifact.get_profile()
-
-    artifact_pkgs = ["gentoo-systemd-integration", "util-linux","timezone-data","bash","gzip",
-                     "grep","openssh", "coreutils", "procps", "net-tools", "iproute2", "iputils", 
-                     "dbus", "python", "rsync", "tcpdump", "ca-certificates","e2fsprogs"]
-    artifact_pkgs += artifact.get_packages()
-    
-    gentoo_dir = profile.get_gentoo_workdir()
-    cache_dir = profile.get_cache_workdir()
-    pkg_map = package.collect_packages(gentoo_dir)
-
-    masked_packages = get_masked_packages(gentoo_dir)
-
-    pkgs_with_deps = package.scan_pkg_dep(gentoo_dir, pkg_map, artifact_pkgs, masked_packages)
-    pkgs = sorted(pkgs_with_deps.keys())
-
-    if os.path.islink(os.path.join(gentoo_dir, "bin")):
-        print("System looks containing merged /usr.")
-        copy(gentoo_dir, upper_dir, ["/bin", "/sbin", "/lib", "/lib64", "/usr/sbin"])
-
-    files = package.get_all_files_of_all_packages(gentoo_dir, pkgs, artifact.is_devel())
-    if os.path.isfile(os.path.join(gentoo_dir, "boot/kernel")): files.append("/boot/kernel")
-    if os.path.isfile(os.path.join(gentoo_dir, "boot/initramfs")): files.append("/boot/initramfs")
-    if os.path.isdir(os.path.join(gentoo_dir, "lib/modules")): files.append("/lib/modules/.")
-    files += ["/dev/.", "/proc", "/sys", "/root", "/home", "/tmp", "/var/tmp", "/var/run", "/run", "/mnt"]
-    files += ["/etc/passwd", "/etc/group", "/etc/shadow", "/etc/profile.env"]
-    files += ["/etc/ld.so.conf", "/etc/ld.so.conf.d/."]
-    files += ["/usr/lib/locale/locale-archive"]
-    files += ["/bin/sh", "/bin/sed", "/usr/bin/awk", "/usr/bin/python", "/bin/nano", 
-        "/bin/tar", "/usr/bin/unzip",
-        "/usr/bin/wget", "/usr/bin/curl", "/usr/bin/telnet",
-        "/usr/bin/make", "/usr/bin/diff", "/usr/bin/patch", "/usr/bin/strings", "/usr/bin/strace", 
-        "/usr/bin/find", "/usr/bin/xargs", "/usr/bin/less"]
-    files += ["/sbin/iptables", "/sbin/ip6tables", "/sbin/iptables-restore", "/sbin/ip6tables-restore", "/sbin/iptables-save", "/sbin/ip6tables-save"]
-    files += ["/usr/sbin/locale-gen"]
-    files += artifact.get_files()
-
-    print("Copying files to artifact dir...")
-    copy(gentoo_dir, upper_dir, files)
-    copyup_gcc_libs(gentoo_dir, upper_dir)
-    remove_root_password(upper_dir)
-    make_ld_so_conf_latest(upper_dir)
-    create_default_iptables_rules(upper_dir)
-    set_locale_conf_to_pam_env(upper_dir)
-
-    variant = artifact.get_active_variant()
-    variant_args = ["-E", "VARIANT=%s" % variant] if variant is not None else []
-
-    # per-package setup
-    newest_pkg_file = 0
-    for pkg in pkgs:
-        pkg_wo_ver = pkg if pkg[0] == '@' else package.strip_ver(pkg)
-        for f in sorted(glob.glob("usr/lib/genpack/package-scripts/%s/*" % (pkg_wo_ver), root_dir=gentoo_dir)):
-            if not os.access(os.path.join(gentoo_dir, f), os.X_OK): continue
-            #else
-            print("Executing package script %s..." % f)
-            upper_exec(gentoo_dir, upper_dir, cache_dir, profile, artifact, variant, f)
-        package_dir = package.get_dir(pkg_wo_ver)
-        if not os.path.isdir(package_dir): continue
-        #else
-        print("Processing package %s..." % pkg_wo_ver)
-        newest_pkg_file = max(newest_pkg_file, sync_files(package_dir, upper_dir, r"^CONTENTS(\.|$)"))
-        if os.path.isfile(os.path.join(upper_dir, "pkgbuild")):
-            upper_exec(gentoo_dir, upper_dir, cache_dir, profile, artifact, variant, ["sh", "-c", "/pkgbuild && rm -f /pkgbuild"])
-
-    # artifact specific setup
-    newest_artifact_file = max(newest_pkg_file, sync_files(artifact.get_dir(), upper_dir))
-    if os.path.isfile(os.path.join(upper_dir, "build")):
-        print("Building artifact...")
-        upper_exec(gentoo_dir, upper_dir, cache_dir, profile, artifact, variant, "/build")
-    else:
-        print("Artifact build script not found.")
-    subprocess.check_call(sudo(["rm", "-rf", os.path.join(upper_dir, "build"), os.path.join(upper_dir,"build.json"), os.path.join(upper_dir,"usr/src")]))
-
-    # enable services
-    enable_services(upper_dir, ["sshd","systemd-networkd", "systemd-resolved", "systemd-timesyncd"] + artifact.get_services())
-
-    # generate metadata
-    genpack_metadata_dir = os.path.join(upper_dir, ".genpack")
-    subprocess.check_call(sudo(["mkdir", "-p", genpack_metadata_dir]))
-    subprocess.check_call(sudo(["chmod", "o+rwx", genpack_metadata_dir]))
-    with open(os.path.join(genpack_metadata_dir, "arch"), "w") as f:
-        f.write(arch.get())
-    with open(os.path.join(genpack_metadata_dir, "profile"), "w") as f:
-        f.write(profile.name)
-    with open(os.path.join(genpack_metadata_dir, "artifact"), "w") as f:
-        f.write(artifact.name)
-    if variant is not None:
-        with open(os.path.join(genpack_metadata_dir, "variant"), "w") as f:
-            f.write(variant)
-    portage_dir = workdir.get_portage(False)
-    shutil.copy2(os.path.join(portage_dir, "metadata/timestamp.commit"), os.path.join(genpack_metadata_dir, "timestamp.commit"))
-    with open(os.path.join(genpack_metadata_dir, "packages"), "w") as f:
-        for pkg in pkgs:
-            if pkg[0] == '@': continue # skip package set
-            #else
-            f.write(pkg + '\n')
-            if pkg in pkgs_with_deps:
-                if "NEEDED_BY" in pkgs_with_deps[pkg]:
-                    f.write("# NEEDED_BY: " + (' '.join(pkgs_with_deps[pkg]["NEEDED_BY"])) + '\n')
-                pkg_properties = ["DESCRIPTION", "USE", "HOMEPAGE", "LICENSE"]
-                for prop in pkg_properties:
-                    if prop in pkgs_with_deps[pkg]:
-                        f.write("# " + prop + ": " + pkgs_with_deps[pkg][prop] + '\n')
-            f.write('\n')
-    subprocess.check_call(sudo(["chown", "-R", "root:root", genpack_metadata_dir]))
-    subprocess.check_call(sudo(["chmod", "755", genpack_metadata_dir]))
 
 def get_all_sets(gentoo_dir, pkgs, sets=None):
     if sets is None: sets = set()
@@ -344,6 +217,8 @@ def build(artifact):
     cmdline = ["/usr/bin/copyup-packages", "--bind-mount-root", "--toplevel-dirs", "--exec-package-scripts"]
     cmdline += ["--generate-metadata"]
     if artifact.is_devel(): cmdline += ["--devel"]
+    for dep_removal in artifact.get_dep_removals():
+        cmdline += ["--dep-removal", dep_removal]
     artifact_packages = artifact.get_packages()
     cmdline += artifact_packages
     variant = artifact.get_active_variant()
