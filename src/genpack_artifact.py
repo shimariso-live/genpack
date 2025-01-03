@@ -264,12 +264,7 @@ def pack(artifact, outfile=None, compression=None):
     if outfile is None: outfile = artifact.get_outfile()
     if compression is None: compression = artifact.get_compression()
     cmdline = ["mksquashfs", artifact.get_workdir(), outfile, "-noappend", "-no-exports"]
-    if compression == "xz":
-        filter = None
-        if arch.get() == "i686" or arch.get() == "x86_64": filter = "x86"
-        elif arch.get() == "aarch64": filter = "arm"
-        cmdline += ["-comp", "xz", "-b", "1M"]
-        if filter is not None: cmdline += ["-Xbcj", filter]
+    if compression == "xz": cmdline += ["-comp", "xz", "-b", "1M"]
     elif compression == "gzip": cmdline += ["-Xcompression-level", "1"]
     elif compression == "lzo": cmdline += ["-comp", "lzo"]
     else: raise BaseException("Unknown compression type %s" % compression)
