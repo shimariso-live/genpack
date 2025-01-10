@@ -32,7 +32,7 @@ def bash(args):
 def build(args):
     artifacts = []
     if len(args.artifact) == 0 and os.path.isdir("./artifacts"):
-        artifacts += genpack_artifact.Artifact.get_all_artifacts()
+        artifacts += [artifact for artifact in genpack_artifact.Artifact.get_all_artifacts() if artifact.arch_matches()]
     else:
         for artifact in args.artifact:
             artifacts.append(genpack_artifact.Artifact(artifact))
@@ -49,6 +49,8 @@ def build(args):
     profiles_prepared = set()
 
     for artifact in artifacts:
+        if not artifact.arch_matches():
+            raise Exception("Architecture mismatch: %s" % artifact.name)
         profiles.add(artifact.get_profile())
 
     for profile in profiles:

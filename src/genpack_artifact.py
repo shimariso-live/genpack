@@ -47,6 +47,14 @@ class Artifact:
         if not isinstance(services, list): raise Exception("services must be list")
         #else
         return services
+    def arch_matches(self, _arch = None):
+        if _arch is None: _arch = arch.get()
+        arches = self.lookup_build_json("arch", None)
+        if arches is None: return True
+        if isinstance(arches, str): arches = [arches]
+        if not isinstance(arches, list): raise Exception("arch must be string or list")
+        #else
+        return _arch in arches
     def is_devel(self):
         return self.lookup_build_json("devel", False)
     def get_outfile(self, default_value = None):
