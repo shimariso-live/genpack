@@ -275,6 +275,7 @@ def pack(artifact, outfile=None, compression=None):
     if compression == "xz": cmdline += ["-comp", "xz", "-b", "1M"]
     elif compression == "gzip": cmdline += ["-Xcompression-level", "1"]
     elif compression == "lzo": cmdline += ["-comp", "lzo"]
+    elif compression == "none": cmdline += ["-no-compression"]
     else: raise BaseException("Unknown compression type %s" % compression)
     cpus = global_options.cpus()
     if cpus is not None: cmdline += ["-processors", str(cpus)]

@@ -78,7 +78,7 @@ def build(args):
                 genpack_artifact.build(artifact)
             if not artifact.is_outfile_up_to_date():
                 print("Packing artifact %s..." % artifact.name)
-                genpack_artifact.pack(artifact)
+                genpack_artifact.pack(artifact, None, args.compression_override)
         except Exception as e:
             if args.keep_going:
                 logging.error("Error occurred while building artifact %s: %s" % (artifact.name, str(e)))
@@ -139,6 +139,7 @@ if __name__ == "__main__":
     build_parser.add_argument('--keep-going', action='store_true', help='Keep going even if an error occurs')
     build_parser.add_argument('--disable-using-binpkg', action='store_true', help='Disable using binary packages')
     build_parser.add_argument('--variant', default=None, help='Variant to build')
+    build_parser.add_argument('--compression-override', default=None, help='Override compression method')
     build_parser.set_defaults(func=build)
 
     # run subcommand
