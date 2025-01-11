@@ -166,7 +166,7 @@ def link_files(srcdir, dstdir):
     
     return newest_file
 
-def prepare(profile, setup_only = False):
+def prepare(profile, disable_using_binpkg = False, setup_only = False):
     extract_portage()
     gentoo_dir = profile.get_gentoo_workdir()
     extract_stage3(gentoo_dir)
@@ -194,11 +194,15 @@ def prepare(profile, setup_only = False):
     if setup_only or (done_file_time is not None and  newest_file <= done_file_time): return
 
     #else
-    lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "-bk", "--binpkg-respect-use=y", "-uDN", "genpack-progs", "--keep-going"])
-    lower_exec(gentoo_dir, cache_dir, portage_dir, ["genpack-prepare"])
+    if disable_using_binpkg:
+        print("Disabling using binary packages")
+        lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "-b", "--usepkg=n", "-uDN", "genpack-progs", "--keep-going"])
+    else:
+        lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "-bk", "--binpkg-respect-use=y", "-uDN", "genpack-progs", "--keep-going"])
+    lower_exec(gentoo_dir, cache_dir, portage_dir, ["genpack-prepare"] + (["--disable-using-binpkg"] if disable_using_binpkg else []))
 
 def bash(profile):
-    prepare(profile, True)
+    prepare(profile, False, True)
     print("Entering profile %s with bash..." % profile.name)
     print("Run `eclean-pkg -d` to clean up binary packages which is uninstalled.")
     gentoo_dir = profile.get_gentoo_workdir()

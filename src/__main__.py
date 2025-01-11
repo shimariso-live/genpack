@@ -15,10 +15,11 @@ def prepare(args):
             profiles.append(genpack_profile.Profile(profile))
     if len(profiles) == 0: profiles.append(genpack_profile.Profile("default"))
 
+    disable_using_binpkg = args.disable_using_binpkg
     for profile in profiles:
         print("Preparing profile %s..." % profile.name)
         try:
-            genpack_profile.prepare(profile)
+            genpack_profile.prepare(profile, disable_using_binpkg)
         except Exception as e:
             if args.keep_going:
                 logging.error("Error occurred while preparing profile %s: %s" % (profile.name, str(e)))
@@ -53,10 +54,11 @@ def build(args):
             raise Exception("Architecture mismatch: %s" % artifact.name)
         profiles.add(artifact.get_profile())
 
+    disable_using_binpkg = args.disable_using_binpkg
     for profile in profiles:
         print("Preparing profile %s..." % profile.name)
         try:
-            genpack_profile.prepare(profile)
+            genpack_profile.prepare(profile, disable_using_binpkg)
             profiles_prepared.add(profile)
         except Exception as e:
             if args.keep_going:
@@ -123,6 +125,7 @@ if __name__ == "__main__":
     prepare_parser = subparsers.add_parser('prepare', help='Prepare profiles')
     prepare_parser.add_argument('profile', nargs='*', default=[], help='Profiles to prepare')
     prepare_parser.add_argument('--keep-going', action='store_true', help='Keep going even if an error occurs')
+    prepare_parser.add_argument('--disable-using-binpkg', action='store_true', help='Disable using binary packages')
     prepare_parser.set_defaults(func=prepare)
 
     # bash subcommand
@@ -134,6 +137,7 @@ if __name__ == "__main__":
     build_parser = subparsers.add_parser('build', help='Build artifacts')
     build_parser.add_argument("artifact", default=[], nargs='*', help="Artifacts to build")
     build_parser.add_argument('--keep-going', action='store_true', help='Keep going even if an error occurs')
+    build_parser.add_argument('--disable-using-binpkg', action='store_true', help='Disable using binary packages')
     build_parser.add_argument('--variant', default=None, help='Variant to build')
     build_parser.set_defaults(func=build)
 
