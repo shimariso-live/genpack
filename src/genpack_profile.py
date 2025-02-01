@@ -201,15 +201,18 @@ def prepare(profile, disable_using_binpkg = False, setup_only = False):
         lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "-bk", "--binpkg-respect-use=y", "-uDN", "genpack-progs", "--keep-going"])
     lower_exec(gentoo_dir, cache_dir, portage_dir, ["genpack-prepare"] + (["--disable-using-binpkg"] if disable_using_binpkg else []))
 
-def bash(profile):
+def bash(profile, bind = []):
     prepare(profile, False, True)
     print("Entering profile %s with bash..." % profile.name)
     print("Run `eclean-pkg -d` to clean up binary packages which is uninstalled.")
     gentoo_dir = profile.get_gentoo_workdir()
     cache_dir = profile.get_cache_workdir()
     portage_dir = workdir.get_portage(False)
+    nspawn_opts = []
+    for b in bind:
+        nspawn_opts.append("--bind=%s" % b)
     try:
-        lower_exec(gentoo_dir, cache_dir, portage_dir, ["bash"])
+        lower_exec(gentoo_dir, cache_dir, portage_dir, ["bash"], nspawn_opts=nspawn_opts)
     except subprocess.CalledProcessError:
         # ignore exception raised by subprocess.check_call
         pass

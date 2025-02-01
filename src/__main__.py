@@ -27,8 +27,10 @@ def prepare(args):
                 raise e
 
 def bash(args):
+    if global_options.debug():
+        logging.debug(args.bind)
     profile = genpack_profile.Profile(args.profile)
-    genpack_profile.bash(profile)
+    genpack_profile.bash(profile, args.bind)
 
 def build(args):
     artifacts = []
@@ -131,6 +133,7 @@ if __name__ == "__main__":
     # bash subcommand
     bash_parser = subparsers.add_parser('bash', help='Run bash on a profile')
     bash_parser.add_argument('profile', nargs='?', default='default', help='Profile to run bash')
+    bash_parser.add_argument('--bind', action='append', default=[], help="Bind mount in HOST_PATH:CONTAINER_PATH format")
     bash_parser.set_defaults(func=bash)
 
     # build subcommand
