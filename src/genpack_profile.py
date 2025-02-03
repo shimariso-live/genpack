@@ -102,7 +102,7 @@ def extract_stage3(root_dir, variant = "systemd"):
     with user_dir.stage3_tarball(variant) as stage3_tarball:
         upstream.download_if_necessary(upstream.get_latest_stage3_tarball_url(variant), stage3_tarball)
         if os.path.exists(stage3_done_file) and os.stat(stage3_done_file).st_mtime > os.stat(stage3_tarball).st_mtime:
-            return
+            return False # stage3 already extracted
 
         workdir.move_to_trash(root_dir)
         os.makedirs(root_dir)
@@ -120,6 +120,7 @@ def extract_stage3(root_dir, variant = "systemd"):
         f.write('FEATURES="-sandbox -usersandbox -network-sandbox"\n')
     with open(stage3_done_file, "w") as f:
         pass
+    return True
 
 def sync_overlay(root_dir, overlay_url = "https://github.com/wbrxcorp/genpack-overlay.git"):
     with user_dir.overlay_dir() as overlay_dir:
@@ -169,7 +170,7 @@ def link_files(srcdir, dstdir):
 def prepare(profile, disable_using_binpkg = False, setup_only = False):
     extract_portage()
     gentoo_dir = profile.get_gentoo_workdir()
-    extract_stage3(gentoo_dir)
+    fresh_stage3 = extract_stage3(gentoo_dir)
     sync_overlay(gentoo_dir)
 
     newest_file = 0
@@ -194,11 +195,18 @@ def prepare(profile, disable_using_binpkg = False, setup_only = False):
     if setup_only or (done_file_time is not None and  newest_file <= done_file_time): return
 
     #else
+    # install genpack-progs
     if disable_using_binpkg:
         print("Disabling using binary packages")
         lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "-b", "--usepkg=n", "-uDN", "genpack-progs", "--keep-going"])
     else:
         lower_exec(gentoo_dir, cache_dir, portage_dir, ["emerge", "-bk", "--binpkg-respect-use=y", "-uDN", "genpack-progs", "--keep-going"])
+
+    if fresh_stage3:
+        # unmerge unnecceary pythons
+        lower_exec(gentoo_dir, cache_dir, portage_dir, ["check-unwanted-pythons", "--unmerge"])
+
+    # do preparation
     lower_exec(gentoo_dir, cache_dir, portage_dir, ["genpack-prepare"] + (["--disable-using-binpkg"] if disable_using_binpkg else []))
 
 def bash(profile, bind = []):
