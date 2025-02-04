@@ -263,10 +263,15 @@ def build(artifact):
         upper_exec(gentoo_dir, upper_dir, cache_dir, profile, artifact, variant, "/build")
     else:
         print("Artifact build script not found.")
-    subprocess.check_call(sudo(["rm", "-rf", os.path.join(upper_dir, "build"), os.path.join(upper_dir,"build.json"), os.path.join(upper_dir,"usr/src")]))
 
     # enable services
     enable_services(upper_dir, artifact.get_services())
+
+    subprocess.check_call(sudo(["rm", "-rf", 
+                                os.path.join(upper_dir, "build"), 
+                                os.path.join(upper_dir, "build.json"), 
+                                os.path.join(upper_dir, "usr/src"),
+                                os.path.join(upper_dir, "etc/resolv.conf")]))
 
 def pack(artifact, outfile=None, compression=None):
     if outfile is None: outfile = artifact.get_outfile()
