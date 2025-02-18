@@ -27,7 +27,23 @@ class Profile:
     def get_gentoo_workdir_time(self):
         gentoo_dir = self.get_gentoo_workdir()
         done_file = os.path.join(gentoo_dir, ".done")
-        return os.stat(done_file).st_mtime if os.path.isfile(done_file) else None
+        if not os.path.isfile(done_file): return None
+        #else
+        # get latest pkgdb timestamp
+        pkgdb_dir = os.path.join(gentoo_dir, "var/db/pkg")
+        latest_pkgdb_timestamp = os.path.getmtime(pkgdb_dir)
+        for root, dirs, files in os.walk(pkgdb_dir):
+            for name in dirs:
+                timestamp = os.path.getmtime(os.path.join(root, name))
+                if timestamp > latest_pkgdb_timestamp:
+                    latest_pkgdb_timestamp = timestamp
+        #remove .done file if it is older than latest pkgdb timestamp
+        done_file_time = os.stat(done_file).st_mtime
+        if done_file_time < latest_pkgdb_timestamp:
+            os.unlink(done_file)
+            return None
+        #else
+        return done_file_time
     def set_gentoo_workdir_time(self):
         gentoo_dir = self.get_gentoo_workdir()
         with open(os.path.join(gentoo_dir, ".done"), "w") as f:
