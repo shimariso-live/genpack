@@ -31,6 +31,7 @@ class Profile:
         #else
         # get latest pkgdb timestamp
         pkgdb_dir = os.path.join(gentoo_dir, "var/db/pkg")
+        if not os.path.isdir(pkgdb_dir): return None
         latest_pkgdb_timestamp = os.path.getmtime(pkgdb_dir)
         for root, dirs, files in os.walk(pkgdb_dir):
             for name in dirs:
