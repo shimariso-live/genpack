@@ -91,7 +91,12 @@ class Artifact:
         build_date = self.get_build_time()
         if build_date is None: return False
         #else
-        return build_date > max(self.get_profile().get_gentoo_workdir_time(), self.get_last_modified(), package.get_last_modified())
+        profile = self.get_profile()
+        gentoo_workdir_time = profile.get_gentoo_workdir_time()
+        if gentoo_workdir_time is None:
+            raise Exception("Profile %s must be prepared before checking if artifact %s is up-to-date" % (profile.name, self.name))
+        #else
+        return build_date > max(gentoo_workdir_time, self.get_last_modified(), package.get_last_modified())
     def is_outfile_up_to_date(self):
         outfile = self.get_outfile()
         if not os.path.isfile(outfile): return False
