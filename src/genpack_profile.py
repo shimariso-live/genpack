@@ -164,7 +164,7 @@ def scan_files(dir):
     for root,dirs,files in os.walk(dir, followlinks=True):
         if len(files) == 0: continue
         for f in files:
-            mtime = os.stat(os.path.join(root,f)).st_mtime
+            mtime = os.lstat(os.path.join(root,f)).st_mtime
             if mtime > newest_file: newest_file = mtime
             files_found.append(os.path.join(root[len(dir) + 1:], f))
     return (files_found, newest_file)
@@ -180,7 +180,10 @@ def link_files(srcdir, dstdir):
             if not os.path.isdir(dst_dir): raise Exception("%s should be a directory" % dst_dir)
         else:
             subprocess.check_call(sudo(["mkdir", "-p", dst_dir]))
-        subprocess.check_call(sudo(["ln", "-f", src, dst]))
+        if os.path.islink(src):
+            subprocess.check_call(sudo(["cp", "-d", "--remove-destination", src, dst]))
+        else:
+            subprocess.check_call(sudo(["ln", "-f", src, dst]))
     
     return newest_file
 
