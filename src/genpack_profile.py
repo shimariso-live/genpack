@@ -1,4 +1,4 @@
-import os,subprocess,glob
+import os,subprocess,glob,logging,time
 import workdir,user_dir,upstream,genpack_json,global_options
 from sudo import sudo
 
@@ -24,11 +24,8 @@ class Profile:
         return workdir.get_profile(self.name, "root")
     def get_cache_workdir(self):
         return workdir.get_profile(self.name, "cache")
-    def get_gentoo_workdir_time(self):
+    def get_latest_pkgdb_timestamp(self):
         gentoo_dir = self.get_gentoo_workdir()
-        done_file = os.path.join(gentoo_dir, ".done")
-        if not os.path.isfile(done_file): return None
-        #else
         # get latest pkgdb timestamp
         pkgdb_dir = os.path.join(gentoo_dir, "var/db/pkg")
         if not os.path.isdir(pkgdb_dir): return None
@@ -38,17 +35,25 @@ class Profile:
                 timestamp = os.path.getmtime(os.path.join(root, name))
                 if timestamp > latest_pkgdb_timestamp:
                     latest_pkgdb_timestamp = timestamp
+        return latest_pkgdb_timestamp
+    def get_gentoo_workdir_time(self):
+        gentoo_dir = self.get_gentoo_workdir()
+        done_file = os.path.join(gentoo_dir, ".done")
+        if not os.path.isfile(done_file): return None
+        #else
+        latest_pkgdb_timestamp = self.get_latest_pkgdb_timestamp()
+        if latest_pkgdb_timestamp is None: return None
+        #else
         #remove .done file if it is older than latest pkgdb timestamp
         done_file_time = os.stat(done_file).st_mtime
         if done_file_time < latest_pkgdb_timestamp:
+            done_file_time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(done_file_time))
+            latest_pkgdb_timestamp_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(latest_pkgdb_timestamp))
+            logging.debug("Removing %s because it(%s) is older than latest pkgdb timestamp(%s)" % (done_file, done_file_time_str, latest_pkgdb_timestamp_str))
             os.unlink(done_file)
             return None
         #else
         return done_file_time
-    def set_gentoo_workdir_time(self):
-        gentoo_dir = self.get_gentoo_workdir()
-        with open(os.path.join(gentoo_dir, ".done"), "w") as f:
-            pass
     def get_all_profiles():
         profile_names = genpack_json.get("profiles", [])
         if not isinstance(profile_names, list): raise Exception("profiles must be a list")
@@ -203,6 +208,8 @@ def prepare(profile, disable_using_binpkg = False, setup_only = False):
 
     portage_dir = workdir.get_portage(False)
     done_file_time = profile.get_gentoo_workdir_time()
+    done_file_time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(done_file_time)) if done_file_time is not None else None
+    logging.debug("done_file_time: %s" % done_file_time_str)
 
     portage_time = os.stat(os.path.join(portage_dir, "metadata/timestamp")).st_mtime
     overlay_time = 0
@@ -228,6 +235,10 @@ def prepare(profile, disable_using_binpkg = False, setup_only = False):
 
     # do preparation
     lower_exec(gentoo_dir, cache_dir, portage_dir, ["genpack-prepare"] + (["--disable-using-binpkg"] if disable_using_binpkg else []))
+
+    if profile.get_gentoo_workdir_time() is None:
+        current_time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time()))
+        raise Exception("/var/db/pkg is newer than .done file. Something went wrong. Current time: %s" % current_time_str)
 
 def bash(profile, bind = []):
     prepare(profile, False, True)

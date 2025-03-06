@@ -1,4 +1,4 @@
-import os,json,subprocess,re,shutil,glob
+import os,json,subprocess,re,logging
 import workdir,arch,package,genpack_profile,genpack_json,global_options
 from sudo import sudo
 
